@@ -626,6 +626,41 @@ def cmd_labels(args):
         sys.exit(1)
 
 
+def check_people_api_error(e: HttpError) -> bool:
+    """Check if error is due to People API not being enabled and provide helpful message."""
+    error_str = str(e)
+    if "People API has not been used" in error_str or "accessNotConfigured" in error_str:
+        # Extract project number from error if possible
+        import re
+        project_match = re.search(r'project (\d+)', error_str)
+        project_id = project_match.group(1) if project_match else "YOUR_PROJECT"
+
+        enable_url = f"https://console.developers.google.com/apis/api/people.googleapis.com/overview?project={project_id}"
+
+        print(json.dumps({
+            "error": "People API not enabled",
+            "message": "The People API (Contacts) needs to be enabled in Google Cloud Console.",
+            "enable_url": enable_url,
+            "instructions": [
+                f"1. Open: {enable_url}",
+                "2. Click 'ENABLE' button",
+                "3. Wait ~30 seconds for propagation",
+                "4. Try again"
+            ]
+        }, indent=2))
+
+        # Offer to open browser
+        try:
+            response = input("\nOpen Google Cloud Console to enable People API? [Y/n]: ").strip().lower()
+            if response != 'n':
+                webbrowser.open(enable_url)
+        except:
+            pass
+
+        return True
+    return False
+
+
 def cmd_contacts(args):
     """List contacts."""
     service = get_people_service(args.account)
@@ -664,7 +699,8 @@ def cmd_contacts(args):
         print(json.dumps(output, indent=2))
 
     except HttpError as e:
-        print(json.dumps({"error": str(e)}))
+        if not check_people_api_error(e):
+            print(json.dumps({"error": str(e)}))
         sys.exit(1)
 
 
@@ -679,8 +715,11 @@ def cmd_search_contacts(args):
                 query="",
                 readMask="names",
             ).execute()
-        except:
-            pass  # Warmup can fail, that's ok
+        except HttpError as warmup_error:
+            # Check if it's an API not enabled error
+            if check_people_api_error(warmup_error):
+                sys.exit(1)
+            # Otherwise continue - warmup can fail for other reasons
 
         # Actual search
         results = service.people().searchContacts(
@@ -716,7 +755,8 @@ def cmd_search_contacts(args):
         print(json.dumps(output, indent=2))
 
     except HttpError as e:
-        print(json.dumps({"error": str(e)}))
+        if not check_people_api_error(e):
+            print(json.dumps({"error": str(e)}))
         sys.exit(1)
 
 
