@@ -788,6 +788,51 @@ def cmd_contact(args):
         sys.exit(1)
 
 
+def cmd_other_contacts(args):
+    """List 'other contacts' - auto-created from email interactions."""
+    service = get_people_service(args.account)
+
+    try:
+        all_contacts = []
+        page_token = None
+
+        while True:
+            results = service.otherContacts().list(
+                pageSize=min(args.max_results - len(all_contacts), 1000),
+                readMask="names,emailAddresses,phoneNumbers",
+                pageToken=page_token,
+            ).execute()
+
+            contacts = results.get("otherContacts", [])
+
+            for person in contacts:
+                contact = {
+                    "resourceName": person.get("resourceName"),
+                    "names": [n.get("displayName") for n in person.get("names", [])],
+                    "emails": [e.get("value") for e in person.get("emailAddresses", [])],
+                    "phones": [p.get("value") for p in person.get("phoneNumbers", [])],
+                }
+                # Only include contacts with a name or email
+                if contact["names"] or contact["emails"]:
+                    all_contacts.append(contact)
+
+            page_token = results.get("nextPageToken")
+            if not page_token or len(all_contacts) >= args.max_results:
+                break
+
+        output = {
+            "results": all_contacts[:args.max_results],
+            "total": len(all_contacts[:args.max_results]),
+            "source": "other_contacts (auto-created from email interactions)",
+        }
+        print(json.dumps(output, indent=2))
+
+    except HttpError as e:
+        if not check_people_api_error(e):
+            print(json.dumps({"error": str(e)}))
+        sys.exit(1)
+
+
 def add_account_arg(parser):
     """Add --account argument to a parser."""
     parser.add_argument(
@@ -850,6 +895,12 @@ def main():
     contacts_parser.add_argument("--max-results", type=int, default=100, help="Max results (default: 100)")
     add_account_arg(contacts_parser)
     contacts_parser.set_defaults(func=cmd_contacts)
+
+    # Other contacts command (auto-created from interactions)
+    other_contacts_parser = subparsers.add_parser("other-contacts", help="List contacts auto-created from email interactions")
+    other_contacts_parser.add_argument("--max-results", type=int, default=500, help="Max results (default: 500)")
+    add_account_arg(other_contacts_parser)
+    other_contacts_parser.set_defaults(func=cmd_other_contacts)
 
     # Search contacts command
     search_contacts_parser = subparsers.add_parser("search-contacts", help="Search contacts")
