@@ -1,0 +1,18 @@
+# Virtual environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Credentials and tokens (sensitive)
+credentials.json
+tokens/
+accounts.json
+
+# OS files
+.DS_Store
+*.swp
+
+# IDE
+.idea/
+.vscode/
