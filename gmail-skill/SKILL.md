@@ -1,6 +1,6 @@
 ---
 name: gmail-skill
-description: Read, search, and send Gmail emails and Google contacts. Use when the user asks to check email, find emails, search messages, send emails, look up contacts, or find someone's email/phone. Supports multiple accounts.
+description: Read, search, send, and draft Gmail emails and Google contacts. Use when the user asks to check email, find emails, search messages, send emails, create drafts, look up contacts, or find someone's email/phone. Supports multiple accounts.
 allowed-tools: Bash, Read
 ---
 
@@ -41,7 +41,7 @@ On first run, the script will guide you through setup. You need to create a Goog
    - User Type: External
    - App name: Gmail Skill
    - Add yourself as test user
-   - Add scopes: `gmail.readonly`, `gmail.send`, `contacts.readonly`
+   - Add scopes: `gmail.readonly`, `gmail.send`, `gmail.modify`, `contacts.readonly`
 5. Create OAuth client ID:
    - Application type: **Desktop app**
    - Download JSON → save as `~/.claude/skills/gmail-skill/credentials.json`
@@ -145,6 +145,43 @@ python3 ~/.claude/skills/gmail-skill/gmail_skill.py unstar EMAIL_ID [--account E
 All label commands support multiple IDs (comma-separated):
 ```bash
 python3 ~/.claude/skills/gmail-skill/gmail_skill.py star "id1,id2,id3" --account user@gmail.com
+```
+
+### Create Draft
+
+Creates a draft email. Use `--reply-to-id` when replying to an existing email to ensure proper threading in email clients like Superhuman.
+
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py draft --to EMAIL --subject "Subject" --body "Body text" [--reply-to-id EMAIL_ID] [--cc EMAIL] [--bcc EMAIL] [--account EMAIL]
+```
+
+**Required arguments:**
+- `--to` / `-t` - Recipient email address
+- `--subject` / `-s` - Email subject line
+- `--body` / `-b` - Email body text
+
+**Optional arguments:**
+- `--reply-to-id` / `-r` - Message ID to reply to (adds proper In-Reply-To and References headers for threading)
+- `--cc` - CC recipients (comma-separated)
+- `--bcc` - BCC recipients (comma-separated)
+- `--account` / `-a` - Create draft in specific account
+
+**Example (new email):**
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py draft \
+  --to "recipient@example.com" \
+  --subject "Draft for Review" \
+  --body "Here's my draft message."
+```
+
+**Example (reply to existing email):**
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py draft \
+  --to "sender@example.com" \
+  --subject "Re: Original Subject" \
+  --body "Thanks for your email..." \
+  --reply-to-id 19b99b3127793843 \
+  --account work@company.com
 ```
 
 ### List Labels

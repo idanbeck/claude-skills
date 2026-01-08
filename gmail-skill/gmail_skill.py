@@ -832,6 +832,24 @@ def cmd_unstar(args):
     }, indent=2))
 
 
+def create_reply_message(to: str, subject: str, body: str, in_reply_to: str = None, references: str = None, cc: str = None, bcc: str = None) -> dict:
+    """Create a reply message with proper threading headers."""
+    message = MIMEText(body)
+    message['to'] = to
+    message['subject'] = subject
+    if cc:
+        message['cc'] = cc
+    if bcc:
+        message['bcc'] = bcc
+    if in_reply_to:
+        message['In-Reply-To'] = in_reply_to
+    if references:
+        message['References'] = references
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+    return {'raw': raw}
+
+
 def cmd_draft(args):
     """Create a draft email."""
     service = get_gmail_service(args.account)
@@ -848,13 +866,49 @@ def cmd_draft(args):
             pass
 
     try:
-        message = create_message(
-            to=args.to,
-            subject=args.subject,
-            body=args.body,
-            cc=args.cc,
-            bcc=args.bcc,
-        )
+        in_reply_to = None
+        references = None
+
+        # If replying to a message, get its headers for proper threading
+        if args.reply_to_id:
+            original = service.users().messages().get(
+                userId="me",
+                id=args.reply_to_id,
+                format="metadata",
+                metadataHeaders=["Message-ID", "References"]
+            ).execute()
+
+            headers = {h['name']: h['value'] for h in original.get('payload', {}).get('headers', [])}
+            original_message_id = headers.get('Message-ID', headers.get('Message-Id'))
+            original_references = headers.get('References', '')
+
+            if original_message_id:
+                in_reply_to = original_message_id
+                # References should include the original references plus the message we're replying to
+                if original_references:
+                    references = f"{original_references} {original_message_id}"
+                else:
+                    references = original_message_id
+
+        # Create message with reply headers if available
+        if in_reply_to:
+            message = create_reply_message(
+                to=args.to,
+                subject=args.subject,
+                body=args.body,
+                in_reply_to=in_reply_to,
+                references=references,
+                cc=args.cc,
+                bcc=args.bcc,
+            )
+        else:
+            message = create_message(
+                to=args.to,
+                subject=args.subject,
+                body=args.body,
+                cc=args.cc,
+                bcc=args.bcc,
+            )
 
         # If replying to a thread, add threadId
         draft_body = {"message": message}
@@ -874,6 +928,7 @@ def cmd_draft(args):
             "to": args.to,
             "subject": args.subject,
             "from": from_email,
+            "in_reply_to": in_reply_to,
         }, indent=2))
 
     except HttpError as e:
@@ -1182,7 +1237,8 @@ def main():
     draft_parser.add_argument("--body", "-b", required=True, help="Email body text")
     draft_parser.add_argument("--cc", help="CC recipients (comma-separated)")
     draft_parser.add_argument("--bcc", help="BCC recipients (comma-separated)")
-    draft_parser.add_argument("--thread-id", dest="thread_id", help="Thread ID to reply to")
+    draft_parser.add_argument("--thread-id", dest="thread_id", help="Thread ID for threading")
+    draft_parser.add_argument("--reply-to-id", dest="reply_to_id", help="Message ID to reply to (adds proper In-Reply-To headers)")
     add_account_arg(draft_parser)
     draft_parser.set_defaults(func=cmd_draft)
 
