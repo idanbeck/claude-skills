@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 import webbrowser
 from datetime import datetime
 from email.mime.text import MIMEText
@@ -35,6 +36,9 @@ from typing import Optional
 from urllib.parse import urlencode, parse_qs, urlparse
 import threading
 import secrets
+
+# Email line width for readability (matches Superhuman style)
+EMAIL_LINE_WIDTH = 72
 
 # Check for required libraries
 try:
@@ -467,12 +471,45 @@ def format_email_full(msg: dict) -> dict:
 
 # ============ Email Composition ============
 
+def wrap_email_body(body: str, width: int = EMAIL_LINE_WIDTH) -> str:
+    """Wrap email body text for readability (Superhuman style).
+
+    Preserves paragraph breaks and handles each paragraph separately.
+    """
+    paragraphs = body.split('\n\n')
+    wrapped_paragraphs = []
+
+    for para in paragraphs:
+        # Preserve intentional single line breaks within paragraphs
+        lines = para.split('\n')
+        wrapped_lines = []
+        for line in lines:
+            if line.strip():
+                # Wrap each line, but preserve leading whitespace for signatures etc.
+                leading_space = len(line) - len(line.lstrip())
+                wrapped = textwrap.fill(
+                    line.strip(),
+                    width=width - leading_space,
+                    break_long_words=False,
+                    break_on_hyphens=False
+                )
+                if leading_space:
+                    wrapped = '\n'.join(' ' * leading_space + l for l in wrapped.split('\n'))
+                wrapped_lines.append(wrapped)
+            else:
+                wrapped_lines.append(line)
+        wrapped_paragraphs.append('\n'.join(wrapped_lines))
+
+    return '\n\n'.join(wrapped_paragraphs)
+
+
 def create_message(to: str, subject: str, body: str, cc: str = None, bcc: str = None) -> dict:
     """Create a message for sending.
 
     Returns a dict with 'raw' key containing base64url encoded email.
     """
-    message = MIMEText(body)
+    wrapped_body = wrap_email_body(body)
+    message = MIMEText(wrapped_body)
     message['to'] = to
     message['subject'] = subject
     if cc:
@@ -834,7 +871,8 @@ def cmd_unstar(args):
 
 def create_reply_message(to: str, subject: str, body: str, in_reply_to: str = None, references: str = None, cc: str = None, bcc: str = None) -> dict:
     """Create a reply message with proper threading headers."""
-    message = MIMEText(body)
+    wrapped_body = wrap_email_body(body)
+    message = MIMEText(wrapped_body)
     message['to'] = to
     message['subject'] = subject
     if cc:
