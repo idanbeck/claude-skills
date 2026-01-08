@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Gmail Reader - Read and search Gmail emails and Google contacts.
+Gmail Skill - Read, search, and send Gmail emails. Access Google contacts.
 
 Supports multiple accounts with seamless OAuth browser flow.
 
 Usage:
-    python gmail_reader.py search "query" [--account EMAIL]
-    python gmail_reader.py read EMAIL_ID [--account EMAIL]
-    python gmail_reader.py list [--account EMAIL]
-    python gmail_reader.py labels [--account EMAIL]
-    python gmail_reader.py contacts [--account EMAIL]
-    python gmail_reader.py search-contacts "query" [--account EMAIL]
-    python gmail_reader.py accounts                    # List authenticated accounts
-    python gmail_reader.py logout [--account EMAIL]    # Remove account
+    python gmail_skill.py search "query" [--account EMAIL]
+    python gmail_skill.py read EMAIL_ID [--account EMAIL]
+    python gmail_skill.py list [--account EMAIL]
+    python gmail_skill.py labels [--account EMAIL]
+    python gmail_skill.py send --to EMAIL --subject "..." --body "..." [--account EMAIL]
+    python gmail_skill.py contacts [--account EMAIL]
+    python gmail_skill.py search-contacts "query" [--account EMAIL]
+    python gmail_skill.py accounts                    # List authenticated accounts
+    python gmail_skill.py logout [--account EMAIL]    # Remove account
 """
 
 import argparse
@@ -24,6 +25,8 @@ import re
 import sys
 import webbrowser
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
@@ -49,9 +52,10 @@ TOKENS_DIR = SKILL_DIR / "tokens"
 CREDENTIALS_FILE = SKILL_DIR / "credentials.json"
 ACCOUNTS_META_FILE = SKILL_DIR / "accounts.json"
 
-# Read-only scopes
+# Scopes - includes send capability
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",  # For sending (REQUIRES USER CONFIRMATION)
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/contacts.other.readonly",
     "https://www.googleapis.com/auth/userinfo.email",  # To get email address
@@ -458,6 +462,25 @@ def format_email_full(msg: dict) -> dict:
     }
 
 
+# ============ Email Composition ============
+
+def create_message(to: str, subject: str, body: str, cc: str = None, bcc: str = None) -> dict:
+    """Create a message for sending.
+
+    Returns a dict with 'raw' key containing base64url encoded email.
+    """
+    message = MIMEText(body)
+    message['to'] = to
+    message['subject'] = subject
+    if cc:
+        message['cc'] = cc
+    if bcc:
+        message['bcc'] = bcc
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+    return {'raw': raw}
+
+
 # ============ Commands ============
 
 def cmd_accounts(args):
@@ -598,6 +621,49 @@ def cmd_list(args):
 
     except HttpError as e:
         print(json.dumps({"error": str(e)}))
+        sys.exit(1)
+
+
+def cmd_send(args):
+    """Send an email."""
+    # Get the sender's email from the token
+    token_path = get_token_path(args.account)
+    from_email = "unknown"
+    if token_path.exists():
+        try:
+            with open(token_path) as f:
+                token_data = json.load(f)
+                from_email = token_data.get("email", args.account or "unknown")
+        except:
+            pass
+
+    service = get_gmail_service(args.account)
+
+    try:
+        message = create_message(
+            to=args.to,
+            subject=args.subject,
+            body=args.body,
+            cc=args.cc,
+            bcc=args.bcc,
+        )
+
+        result = service.users().messages().send(
+            userId="me",
+            body=message,
+        ).execute()
+
+        print(json.dumps({
+            "success": True,
+            "message_id": result.get("id"),
+            "thread_id": result.get("threadId"),
+            "to": args.to,
+            "subject": args.subject,
+            "from": from_email,
+        }, indent=2))
+
+    except HttpError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
         sys.exit(1)
 
 
@@ -843,7 +909,7 @@ def add_account_arg(parser):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Gmail Reader - Read and search Gmail emails and Google contacts"
+        description="Gmail Skill - Read, search, and send Gmail emails. Access Google contacts."
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -884,6 +950,16 @@ def main():
     list_parser.add_argument("--label", default=None, help="Label/folder to list from")
     add_account_arg(list_parser)
     list_parser.set_defaults(func=cmd_list)
+
+    # Send email command (REQUIRES USER CONFIRMATION)
+    send_parser = subparsers.add_parser("send", help="Send an email (requires confirmation)")
+    send_parser.add_argument("--to", "-t", required=True, help="Recipient email address")
+    send_parser.add_argument("--subject", "-s", required=True, help="Email subject")
+    send_parser.add_argument("--body", "-b", required=True, help="Email body text")
+    send_parser.add_argument("--cc", help="CC recipients (comma-separated)")
+    send_parser.add_argument("--bcc", help="BCC recipients (comma-separated)")
+    add_account_arg(send_parser)
+    send_parser.set_defaults(func=cmd_send)
 
     # Labels command
     labels_parser = subparsers.add_parser("labels", help="List Gmail labels")
