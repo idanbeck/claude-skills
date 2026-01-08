@@ -832,6 +832,55 @@ def cmd_unstar(args):
     }, indent=2))
 
 
+def cmd_draft(args):
+    """Create a draft email."""
+    service = get_gmail_service(args.account)
+
+    # Get the sender's email from the token
+    token_path = get_token_path(args.account)
+    from_email = "unknown"
+    if token_path.exists():
+        try:
+            with open(token_path) as f:
+                token_data = json.load(f)
+                from_email = token_data.get("email", args.account or "unknown")
+        except:
+            pass
+
+    try:
+        message = create_message(
+            to=args.to,
+            subject=args.subject,
+            body=args.body,
+            cc=args.cc,
+            bcc=args.bcc,
+        )
+
+        # If replying to a thread, add threadId
+        draft_body = {"message": message}
+        if args.thread_id:
+            draft_body["message"]["threadId"] = args.thread_id
+
+        result = service.users().drafts().create(
+            userId="me",
+            body=draft_body,
+        ).execute()
+
+        print(json.dumps({
+            "success": True,
+            "draft_id": result.get("id"),
+            "message_id": result.get("message", {}).get("id"),
+            "thread_id": result.get("message", {}).get("threadId"),
+            "to": args.to,
+            "subject": args.subject,
+            "from": from_email,
+        }, indent=2))
+
+    except HttpError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+        sys.exit(1)
+
+
 def cmd_labels(args):
     """List all Gmail labels."""
     service = get_gmail_service(args.account)
@@ -1125,6 +1174,17 @@ def main():
     send_parser.add_argument("--bcc", help="BCC recipients (comma-separated)")
     add_account_arg(send_parser)
     send_parser.set_defaults(func=cmd_send)
+
+    # Create draft command
+    draft_parser = subparsers.add_parser("draft", help="Create a draft email")
+    draft_parser.add_argument("--to", "-t", required=True, help="Recipient email address")
+    draft_parser.add_argument("--subject", "-s", required=True, help="Email subject")
+    draft_parser.add_argument("--body", "-b", required=True, help="Email body text")
+    draft_parser.add_argument("--cc", help="CC recipients (comma-separated)")
+    draft_parser.add_argument("--bcc", help="BCC recipients (comma-separated)")
+    draft_parser.add_argument("--thread-id", dest="thread_id", help="Thread ID to reply to")
+    add_account_arg(draft_parser)
+    draft_parser.set_defaults(func=cmd_draft)
 
     # Mark as read command
     mark_read_parser = subparsers.add_parser("mark-read", help="Mark email(s) as read")
