@@ -868,8 +868,9 @@ def cmd_draft(args):
     try:
         in_reply_to = None
         references = None
+        thread_id = getattr(args, 'thread_id', None)
 
-        # If replying to a message, get its headers for proper threading
+        # If replying to a message, get its headers and thread for proper threading
         if args.reply_to_id:
             original = service.users().messages().get(
                 userId="me",
@@ -877,6 +878,9 @@ def cmd_draft(args):
                 format="metadata",
                 metadataHeaders=["Message-ID", "References"]
             ).execute()
+
+            # Get thread ID from original message
+            thread_id = original.get('threadId')
 
             headers = {h['name']: h['value'] for h in original.get('payload', {}).get('headers', [])}
             original_message_id = headers.get('Message-ID', headers.get('Message-Id'))
@@ -910,10 +914,10 @@ def cmd_draft(args):
                 bcc=args.bcc,
             )
 
-        # If replying to a thread, add threadId
+        # If replying to a thread, add threadId to keep draft in same conversation
         draft_body = {"message": message}
-        if args.thread_id:
-            draft_body["message"]["threadId"] = args.thread_id
+        if thread_id:
+            draft_body["message"]["threadId"] = thread_id
 
         result = service.users().drafts().create(
             userId="me",
