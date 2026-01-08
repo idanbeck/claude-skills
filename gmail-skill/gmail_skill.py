@@ -697,6 +697,33 @@ def cmd_mark_read(args):
     }, indent=2))
 
 
+def cmd_mark_unread(args):
+    """Mark email(s) as unread."""
+    service = get_gmail_service(args.account)
+
+    # Support multiple IDs
+    email_ids = [id.strip() for id in args.email_ids.split(",")]
+
+    results = []
+    for email_id in email_ids:
+        try:
+            service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"addLabelIds": ["UNREAD"]}
+            ).execute()
+            results.append({"id": email_id, "success": True})
+        except HttpError as e:
+            results.append({"id": email_id, "success": False, "error": str(e)})
+
+    print(json.dumps({
+        "action": "mark_unread",
+        "results": results,
+        "total": len(results),
+        "successful": sum(1 for r in results if r["success"]),
+    }, indent=2))
+
+
 def cmd_mark_done(args):
     """Archive email(s) - removes from inbox (Gmail 'e' shortcut)."""
     service = get_gmail_service(args.account)
@@ -718,6 +745,87 @@ def cmd_mark_done(args):
 
     print(json.dumps({
         "action": "archive",
+        "results": results,
+        "total": len(results),
+        "successful": sum(1 for r in results if r["success"]),
+    }, indent=2))
+
+
+def cmd_unarchive(args):
+    """Move email(s) back to inbox (undo archive)."""
+    service = get_gmail_service(args.account)
+
+    # Support multiple IDs
+    email_ids = [id.strip() for id in args.email_ids.split(",")]
+
+    results = []
+    for email_id in email_ids:
+        try:
+            service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"addLabelIds": ["INBOX"]}
+            ).execute()
+            results.append({"id": email_id, "success": True})
+        except HttpError as e:
+            results.append({"id": email_id, "success": False, "error": str(e)})
+
+    print(json.dumps({
+        "action": "unarchive",
+        "results": results,
+        "total": len(results),
+        "successful": sum(1 for r in results if r["success"]),
+    }, indent=2))
+
+
+def cmd_star(args):
+    """Star email(s)."""
+    service = get_gmail_service(args.account)
+
+    # Support multiple IDs
+    email_ids = [id.strip() for id in args.email_ids.split(",")]
+
+    results = []
+    for email_id in email_ids:
+        try:
+            service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"addLabelIds": ["STARRED"]}
+            ).execute()
+            results.append({"id": email_id, "success": True})
+        except HttpError as e:
+            results.append({"id": email_id, "success": False, "error": str(e)})
+
+    print(json.dumps({
+        "action": "star",
+        "results": results,
+        "total": len(results),
+        "successful": sum(1 for r in results if r["success"]),
+    }, indent=2))
+
+
+def cmd_unstar(args):
+    """Unstar email(s)."""
+    service = get_gmail_service(args.account)
+
+    # Support multiple IDs
+    email_ids = [id.strip() for id in args.email_ids.split(",")]
+
+    results = []
+    for email_id in email_ids:
+        try:
+            service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"removeLabelIds": ["STARRED"]}
+            ).execute()
+            results.append({"id": email_id, "success": True})
+        except HttpError as e:
+            results.append({"id": email_id, "success": False, "error": str(e)})
+
+    print(json.dumps({
+        "action": "unstar",
         "results": results,
         "total": len(results),
         "successful": sum(1 for r in results if r["success"]),
@@ -1024,11 +1132,35 @@ def main():
     add_account_arg(mark_read_parser)
     mark_read_parser.set_defaults(func=cmd_mark_read)
 
+    # Mark as unread command
+    mark_unread_parser = subparsers.add_parser("mark-unread", help="Mark email(s) as unread")
+    mark_unread_parser.add_argument("email_ids", help="Email ID(s) to mark as unread (comma-separated for multiple)")
+    add_account_arg(mark_unread_parser)
+    mark_unread_parser.set_defaults(func=cmd_mark_unread)
+
     # Mark done (archive) command
     mark_done_parser = subparsers.add_parser("mark-done", help="Archive email(s) - remove from inbox (Gmail 'e' shortcut)")
     mark_done_parser.add_argument("email_ids", help="Email ID(s) to archive (comma-separated for multiple)")
     add_account_arg(mark_done_parser)
     mark_done_parser.set_defaults(func=cmd_mark_done)
+
+    # Unarchive command (undo mark-done)
+    unarchive_parser = subparsers.add_parser("unarchive", help="Move email(s) back to inbox (undo archive)")
+    unarchive_parser.add_argument("email_ids", help="Email ID(s) to unarchive (comma-separated for multiple)")
+    add_account_arg(unarchive_parser)
+    unarchive_parser.set_defaults(func=cmd_unarchive)
+
+    # Star command
+    star_parser = subparsers.add_parser("star", help="Star email(s)")
+    star_parser.add_argument("email_ids", help="Email ID(s) to star (comma-separated for multiple)")
+    add_account_arg(star_parser)
+    star_parser.set_defaults(func=cmd_star)
+
+    # Unstar command
+    unstar_parser = subparsers.add_parser("unstar", help="Unstar email(s)")
+    unstar_parser.add_argument("email_ids", help="Email ID(s) to unstar (comma-separated for multiple)")
+    add_account_arg(unstar_parser)
+    unstar_parser.set_defaults(func=cmd_unstar)
 
     # Labels command
     labels_parser = subparsers.add_parser("labels", help="List Gmail labels")

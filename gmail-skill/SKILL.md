@@ -108,7 +108,13 @@ python3 ~/.claude/skills/gmail-skill/gmail_skill.py send \
 python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-read EMAIL_ID [--account EMAIL]
 ```
 
-Supports multiple IDs (comma-separated):
+### Mark as Unread
+
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-unread EMAIL_ID [--account EMAIL]
+```
+
+Both mark-read and mark-unread support multiple IDs (comma-separated):
 ```bash
 python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-read "id1,id2,id3" --account user@gmail.com
 ```
@@ -121,9 +127,24 @@ Archives email(s) by removing from inbox. Equivalent to Gmail's 'e' keyboard sho
 python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-done EMAIL_ID [--account EMAIL]
 ```
 
-Supports multiple IDs (comma-separated):
+### Unarchive
+
+Moves email(s) back to inbox (undo archive).
+
 ```bash
-python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-done "id1,id2,id3" --account user@gmail.com
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py unarchive EMAIL_ID [--account EMAIL]
+```
+
+### Star / Unstar
+
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py star EMAIL_ID [--account EMAIL]
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py unstar EMAIL_ID [--account EMAIL]
+```
+
+All label commands support multiple IDs (comma-separated):
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py star "id1,id2,id3" --account user@gmail.com
 ```
 
 ### List Labels
