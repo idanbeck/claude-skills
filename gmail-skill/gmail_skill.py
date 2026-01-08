@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gmail Skill - Read, search, and send Gmail emails. Access Google contacts.
+Gmail Skill - Read, search, send, and manage Gmail emails. Access Google contacts.
 
 Supports multiple accounts with seamless OAuth browser flow.
 
@@ -10,6 +10,8 @@ Usage:
     python gmail_skill.py list [--account EMAIL]
     python gmail_skill.py labels [--account EMAIL]
     python gmail_skill.py send --to EMAIL --subject "..." --body "..." [--account EMAIL]
+    python gmail_skill.py mark-read EMAIL_ID [--account EMAIL]
+    python gmail_skill.py mark-done EMAIL_ID [--account EMAIL]  # Archive (Gmail 'e')
     python gmail_skill.py contacts [--account EMAIL]
     python gmail_skill.py search-contacts "query" [--account EMAIL]
     python gmail_skill.py accounts                    # List authenticated accounts
@@ -52,10 +54,11 @@ TOKENS_DIR = SKILL_DIR / "tokens"
 CREDENTIALS_FILE = SKILL_DIR / "credentials.json"
 ACCOUNTS_META_FILE = SKILL_DIR / "accounts.json"
 
-# Scopes - includes send capability
+# Scopes - includes send and modify capabilities
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",  # For sending (REQUIRES USER CONFIRMATION)
+    "https://www.googleapis.com/auth/gmail.send",    # For sending (REQUIRES USER CONFIRMATION)
+    "https://www.googleapis.com/auth/gmail.modify",  # For mark-read, archive, etc.
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/contacts.other.readonly",
     "https://www.googleapis.com/auth/userinfo.email",  # To get email address
@@ -667,6 +670,60 @@ def cmd_send(args):
         sys.exit(1)
 
 
+def cmd_mark_read(args):
+    """Mark email(s) as read."""
+    service = get_gmail_service(args.account)
+
+    # Support multiple IDs
+    email_ids = [id.strip() for id in args.email_ids.split(",")]
+
+    results = []
+    for email_id in email_ids:
+        try:
+            service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"removeLabelIds": ["UNREAD"]}
+            ).execute()
+            results.append({"id": email_id, "success": True})
+        except HttpError as e:
+            results.append({"id": email_id, "success": False, "error": str(e)})
+
+    print(json.dumps({
+        "action": "mark_read",
+        "results": results,
+        "total": len(results),
+        "successful": sum(1 for r in results if r["success"]),
+    }, indent=2))
+
+
+def cmd_mark_done(args):
+    """Archive email(s) - removes from inbox (Gmail 'e' shortcut)."""
+    service = get_gmail_service(args.account)
+
+    # Support multiple IDs
+    email_ids = [id.strip() for id in args.email_ids.split(",")]
+
+    results = []
+    for email_id in email_ids:
+        try:
+            service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"removeLabelIds": ["INBOX"]}
+            ).execute()
+            results.append({"id": email_id, "success": True})
+        except HttpError as e:
+            results.append({"id": email_id, "success": False, "error": str(e)})
+
+    print(json.dumps({
+        "action": "archive",
+        "results": results,
+        "total": len(results),
+        "successful": sum(1 for r in results if r["success"]),
+    }, indent=2))
+
+
 def cmd_labels(args):
     """List all Gmail labels."""
     service = get_gmail_service(args.account)
@@ -960,6 +1017,18 @@ def main():
     send_parser.add_argument("--bcc", help="BCC recipients (comma-separated)")
     add_account_arg(send_parser)
     send_parser.set_defaults(func=cmd_send)
+
+    # Mark as read command
+    mark_read_parser = subparsers.add_parser("mark-read", help="Mark email(s) as read")
+    mark_read_parser.add_argument("email_ids", help="Email ID(s) to mark as read (comma-separated for multiple)")
+    add_account_arg(mark_read_parser)
+    mark_read_parser.set_defaults(func=cmd_mark_read)
+
+    # Mark done (archive) command
+    mark_done_parser = subparsers.add_parser("mark-done", help="Archive email(s) - remove from inbox (Gmail 'e' shortcut)")
+    mark_done_parser.add_argument("email_ids", help="Email ID(s) to archive (comma-separated for multiple)")
+    add_account_arg(mark_done_parser)
+    mark_done_parser.set_defaults(func=cmd_mark_done)
 
     # Labels command
     labels_parser = subparsers.add_parser("labels", help="List Gmail labels")

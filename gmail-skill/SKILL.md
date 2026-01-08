@@ -102,6 +102,30 @@ python3 ~/.claude/skills/gmail-skill/gmail_skill.py send \
   --account work@company.com
 ```
 
+### Mark as Read
+
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-read EMAIL_ID [--account EMAIL]
+```
+
+Supports multiple IDs (comma-separated):
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-read "id1,id2,id3" --account user@gmail.com
+```
+
+### Mark Done (Archive)
+
+Archives email(s) by removing from inbox. Equivalent to Gmail's 'e' keyboard shortcut.
+
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-done EMAIL_ID [--account EMAIL]
+```
+
+Supports multiple IDs (comma-separated):
+```bash
+python3 ~/.claude/skills/gmail-skill/gmail_skill.py mark-done "id1,id2,id3" --account user@gmail.com
+```
+
 ### List Labels
 
 ```bash
