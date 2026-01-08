@@ -16,3 +16,4 @@ accounts.json
 # IDE
 .idea/
 .vscode/
+slack-skill/config.json

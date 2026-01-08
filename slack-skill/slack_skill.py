@@ -248,6 +248,15 @@ def cmd_users(args):
         print(json.dumps({"error": str(e)}))
 
 
+def auto_join_channel(client: WebClient, channel_id: str) -> bool:
+    """Auto-join a public channel. Returns True if successful."""
+    try:
+        client.conversations_join(channel=channel_id)
+        return True
+    except SlackApiError:
+        return False
+
+
 def cmd_read(args):
     """Read messages from a channel."""
     client, workspace = get_client(args.workspace)
@@ -261,10 +270,23 @@ def cmd_read(args):
         # Build user cache for display names
         users_cache = build_users_cache(client)
 
-        result = client.conversations_history(
-            channel=channel_id,
-            limit=args.limit or 20
-        )
+        try:
+            result = client.conversations_history(
+                channel=channel_id,
+                limit=args.limit or 20
+            )
+        except SlackApiError as e:
+            # Auto-join if not in channel
+            if "not_in_channel" in str(e):
+                if auto_join_channel(client, channel_id):
+                    result = client.conversations_history(
+                        channel=channel_id,
+                        limit=args.limit or 20
+                    )
+                else:
+                    raise
+            else:
+                raise
 
         messages = [format_message(msg, users_cache) for msg in result["messages"]]
 
@@ -298,7 +320,17 @@ def cmd_send(args):
         if args.thread_ts:
             kwargs["thread_ts"] = args.thread_ts
 
-        result = client.chat_postMessage(**kwargs)
+        try:
+            result = client.chat_postMessage(**kwargs)
+        except SlackApiError as e:
+            # Auto-join if not in channel
+            if "not_in_channel" in str(e):
+                if auto_join_channel(client, channel_id):
+                    result = client.chat_postMessage(**kwargs)
+                else:
+                    raise
+            else:
+                raise
 
         print(json.dumps({
             "success": True,
