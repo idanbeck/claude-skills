@@ -17,3 +17,6 @@ accounts.json
 .idea/
 .vscode/
 slack-skill/config.json
+slack-skill/.bridge.pid
+slack-skill/bridge.log
+slack-skill/inbox.jsonl
