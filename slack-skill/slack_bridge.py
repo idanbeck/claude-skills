@@ -210,7 +210,8 @@ def handle_message(client: SocketModeClient, req: SocketModeRequest, web_client:
 
             # Check if user is allowed
             if ALLOWED_USERS and user not in ALLOWED_USERS:
-                print(f"  [User {user} not in allowed list, ignoring]")
+                print(f"  [User {user} not in allowed list, rejecting]")
+                send_slack_response(web_client, channel, "I only serve the real Idan", None)
                 print(f"{'='*60}\n")
                 return
 
@@ -232,16 +233,56 @@ def handle_message(client: SocketModeClient, req: SocketModeRequest, web_client:
             text = event.get("text", "")
             ts = event.get("ts")
 
+            # Get user name
+            user_name = user
+            try:
+                user_info = web_client.users_info(user=user)
+                user_name = user_info["user"].get("real_name") or user_info["user"].get("name") or user
+            except:
+                pass
+
+            # Get channel name
+            channel_name = channel
+            try:
+                channel_info = web_client.conversations_info(channel=channel)
+                channel_name = f"#{channel_info['channel']['name']}"
+            except:
+                pass
+
+            # Strip the @mention from the text
+            clean_text = text.split(">", 1)[-1].strip() if ">" in text else text
+
             inbox_msg = {
                 "type": "mention",
                 "channel_id": channel,
+                "channel": channel_name,
                 "user_id": user,
-                "text": text,
+                "user": user_name,
+                "text": clean_text,
                 "ts": ts,
             }
 
             write_to_inbox(inbox_msg)
-            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Mentioned by {user} in {channel}: {text}\n")
+
+            print(f"\n{'='*60}")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Mentioned by {user_name} in {channel_name}")
+            print(f"  {clean_text}")
+
+            # Check if user is allowed
+            if ALLOWED_USERS and user not in ALLOWED_USERS:
+                print(f"  [User {user} not in allowed list, rejecting]")
+                send_slack_response(web_client, channel, "I only serve the real Idan", None)
+                print(f"{'='*60}\n")
+                return
+
+            # Auto-respond if enabled
+            if AUTO_RESPOND and clean_text:
+                print(f"  [Auto-responding via Claude Code...]")
+                response = run_claude_code(clean_text, user_name, channel_name, user)
+                print(f"  Response: {response[:100]}{'...' if len(response) > 100 else ''}")
+                send_slack_response(web_client, channel, response, None)
+
+            print(f"{'='*60}\n")
 
 
 def run_bridge(workspace: str = "default", auto_respond: bool = False, work_dir: str = None):
