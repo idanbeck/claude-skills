@@ -20,3 +20,11 @@ slack-skill/config.json
 slack-skill/.bridge.pid
 slack-skill/bridge.log
 slack-skill/inbox.jsonl
+slack-skill/pending_work.json
+
+# Twilio SMS skill (sensitive)
+twilio-sms/config.json
+twilio-sms/.bridge.pid
+twilio-sms/bridge.log
+twilio-sms/inbox.jsonl
+twilio-sms/conversations.json

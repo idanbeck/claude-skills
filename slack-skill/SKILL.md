@@ -46,6 +46,7 @@ When the user asks to send a Slack message:
    - `mpim:history` - Read group DM messages
    - `mpim:read` - List group DMs
    - `users:read` - List users
+   - `reactions:write` - Add/remove emoji reactions
    - `search:read` - Search messages (optional)
 
 ### 3. Install to Workspace
@@ -123,6 +124,18 @@ python3 ~/.claude/skills/slack-skill/slack_skill.py thread CHANNEL THREAD_TS [--
 python3 ~/.claude/skills/slack-skill/slack_skill.py user USERNAME_OR_ID [--workspace NAME]
 ```
 
+### Add/Remove Emoji Reaction
+
+```bash
+python3 ~/.claude/skills/slack-skill/slack_skill.py react CHANNEL TS EMOJI [--remove] [--workspace NAME]
+```
+
+**Arguments:**
+- `CHANNEL` - Channel name or ID
+- `TS` - Message timestamp
+- `EMOJI` - Emoji name (e.g., `eyes`, `white_check_mark`, or `:thumbsup:`)
+- `--remove` / `-r` - Remove reaction instead of add
+
 ## Multi-Workspace Support
 
 Add workspaces to `~/.claude/skills/slack-skill/config.json`:
@@ -177,6 +190,46 @@ All commands output JSON for easy parsing.
 
 ```bash
 pip install slack_sdk
+```
+
+## Bridge Mode (Real-time Auto-Respond)
+
+The bridge listens for incoming messages and auto-responds using Claude Code:
+
+```bash
+python3 ~/.claude/skills/slack-skill/slack_bridge.py --auto
+```
+
+### Emoji Status Feedback
+
+When processing messages, the bridge shows status via emoji reactions:
+- ⏳ `hourglass_flowing_sand` - Working on response
+- ✅ `white_check_mark` - Response sent
+- 👀 `eyes` - Acknowledged (read but not responding)
+- 🚫 `no_entry` - User not in whitelist
+
+### Thread Reply Handling
+
+The bridge tracks threads it has posted to. When someone replies to a tracked thread:
+1. Evaluates if a response is needed (questions, confirmations, substantial messages)
+2. If responding: shows working → responds in thread → shows done
+3. If not responding: adds 👀 to acknowledge the message was seen
+
+### Bridge Setup
+
+Requires Socket Mode. In your Slack app settings:
+1. Enable **Socket Mode** under Settings
+2. Create an **App-Level Token** with `connections:write` scope
+3. Add the token to config as `app_token`:
+
+```json
+{
+  "default": {
+    "token": "xoxb-bot-token",
+    "app_token": "xapp-app-level-token",
+    "workspace": "your-workspace"
+  }
+}
 ```
 
 ## Security Notes

@@ -9,9 +9,12 @@ Usage:
     python slack_skill.py users [--workspace NAME]
     python slack_skill.py read CHANNEL [--limit N] [--workspace NAME]
     python slack_skill.py send CHANNEL --message "text" [--thread-ts TS] [--workspace NAME]
+    python slack_skill.py edit CHANNEL TS --message "new text" [--workspace NAME]
     python slack_skill.py search "query" [--limit N] [--workspace NAME]
     python slack_skill.py thread CHANNEL THREAD_TS [--workspace NAME]
     python slack_skill.py user USERNAME_OR_ID [--workspace NAME]
+    python slack_skill.py react CHANNEL TS EMOJI [--remove] [--workspace NAME]
+    python slack_skill.py scan [--workdir DIR] [--workspace NAME]
 """
 
 import argparse
@@ -346,6 +349,35 @@ def cmd_send(args):
         print(json.dumps({"success": False, "error": str(e)}))
 
 
+def cmd_edit(args):
+    """Edit a message."""
+    client, workspace = get_client(args.workspace)
+
+    channel_id, channel_name = resolve_channel(client, args.channel)
+    if not channel_id:
+        print(json.dumps({"error": f"Channel/user not found: {args.channel}"}))
+        return
+
+    try:
+        result = client.chat_update(
+            channel=channel_id,
+            ts=args.ts,
+            text=args.message,
+        )
+
+        print(json.dumps({
+            "success": True,
+            "workspace": workspace,
+            "channel": channel_name,
+            "channel_id": channel_id,
+            "message_ts": result["ts"],
+            "text": args.message,
+        }, indent=2))
+
+    except SlackApiError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
 def cmd_search(args):
     """Search messages."""
     client, workspace = get_client(args.workspace)
@@ -455,6 +487,90 @@ def cmd_user(args):
         print(json.dumps({"error": str(e)}))
 
 
+def cmd_upload(args):
+    """Upload a file to a channel."""
+    client, workspace = get_client(args.workspace)
+
+    channel_id, channel_name = resolve_channel(client, args.channel)
+    if not channel_id:
+        print(json.dumps({"error": f"Channel not found: {args.channel}"}))
+        return
+
+    # Check file exists
+    file_path = Path(args.file).expanduser()
+    if not file_path.exists():
+        print(json.dumps({"error": f"File not found: {args.file}"}))
+        return
+
+    try:
+        result = client.files_upload_v2(
+            channel=channel_id,
+            file=str(file_path),
+            title=args.title or file_path.name,
+            initial_comment=args.message or "",
+        )
+
+        print(json.dumps({
+            "success": True,
+            "workspace": workspace,
+            "channel": channel_name,
+            "file": str(file_path),
+            "file_id": result.get("file", {}).get("id"),
+        }, indent=2))
+
+    except SlackApiError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
+def cmd_react(args):
+    """Add or remove a reaction emoji."""
+    client, workspace = get_client(args.workspace)
+
+    channel_id, channel_name = resolve_channel(client, args.channel)
+    if not channel_id:
+        print(json.dumps({"error": f"Channel not found: {args.channel}"}))
+        return
+
+    try:
+        if args.remove:
+            client.reactions_remove(
+                channel=channel_id,
+                timestamp=args.ts,
+                name=args.emoji.strip(':'),
+            )
+            action = "removed"
+        else:
+            client.reactions_add(
+                channel=channel_id,
+                timestamp=args.ts,
+                name=args.emoji.strip(':'),
+            )
+            action = "added"
+
+        print(json.dumps({
+            "success": True,
+            "workspace": workspace,
+            "channel": channel_name,
+            "message_ts": args.ts,
+            "emoji": args.emoji,
+            "action": action,
+        }, indent=2))
+
+    except SlackApiError as e:
+        # Ignore "already_reacted" or "no_reaction" errors
+        if "already_reacted" in str(e) or "no_reaction" in str(e):
+            print(json.dumps({
+                "success": True,
+                "workspace": workspace,
+                "channel": channel_name,
+                "message_ts": args.ts,
+                "emoji": args.emoji,
+                "action": "no_change",
+            }, indent=2))
+        else:
+            print(json.dumps({"success": False, "error": str(e)}))
+
+
 def cmd_workspaces(args):
     """List configured workspaces."""
     config = load_config()
@@ -468,6 +584,25 @@ def cmd_workspaces(args):
         })
 
     print(json.dumps({"workspaces": workspaces}, indent=2))
+
+
+def cmd_scan(args):
+    """Scan inbox for messages with stuck hourglass emojis and process them."""
+    import subprocess
+
+    cmd = ["python3", str(SKILL_DIR / "slack_bridge.py"), "--scan"]
+
+    if args.workspace:
+        cmd.extend(["--workspace", args.workspace])
+
+    if args.workdir:
+        cmd.extend(["--workdir", args.workdir])
+
+    # Run the scan
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
 
 
 # ============ Main ============
@@ -507,6 +642,14 @@ def main():
     sub.add_argument("-w", "--workspace", help="Workspace to use")
     sub.set_defaults(func=cmd_send)
 
+    # Edit
+    sub = subparsers.add_parser("edit", help="Edit a message")
+    sub.add_argument("channel", help="Channel (#name or ID)")
+    sub.add_argument("ts", help="Message timestamp to edit")
+    sub.add_argument("-m", "--message", required=True, help="New message text")
+    sub.add_argument("-w", "--workspace", help="Workspace to use")
+    sub.set_defaults(func=cmd_edit)
+
     # Search
     sub = subparsers.add_parser("search", help="Search messages")
     sub.add_argument("query", help="Search query")
@@ -526,6 +669,30 @@ def main():
     sub.add_argument("user", help="Username or user ID")
     sub.add_argument("-w", "--workspace", help="Workspace to use")
     sub.set_defaults(func=cmd_user)
+
+    # React
+    sub = subparsers.add_parser("react", help="Add/remove emoji reaction")
+    sub.add_argument("channel", help="Channel (#name or ID)")
+    sub.add_argument("ts", help="Message timestamp")
+    sub.add_argument("emoji", help="Emoji name (e.g., 'eyes' or ':eyes:')")
+    sub.add_argument("-r", "--remove", action="store_true", help="Remove reaction instead of add")
+    sub.add_argument("-w", "--workspace", help="Workspace to use")
+    sub.set_defaults(func=cmd_react)
+
+    # Upload
+    sub = subparsers.add_parser("upload", help="Upload a file to a channel")
+    sub.add_argument("channel", help="Channel (#name or ID)")
+    sub.add_argument("file", help="Path to file to upload")
+    sub.add_argument("-t", "--title", help="File title")
+    sub.add_argument("-m", "--message", help="Message to accompany file")
+    sub.add_argument("-w", "--workspace", help="Workspace to use")
+    sub.set_defaults(func=cmd_upload)
+
+    # Scan (cleanup orphaned hourglasses)
+    sub = subparsers.add_parser("scan", help="Scan inbox for stuck hourglass emojis and process them")
+    sub.add_argument("-w", "--workspace", help="Workspace to use")
+    sub.add_argument("--workdir", help="Working directory for Claude Code")
+    sub.set_defaults(func=cmd_scan)
 
     args = parser.parse_args()
 
