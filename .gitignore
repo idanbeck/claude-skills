@@ -28,3 +28,18 @@ twilio-sms/.bridge.pid
 twilio-sms/bridge.log
 twilio-sms/inbox.jsonl
 twilio-sms/conversations.json
+
+# Zmail skill (sensitive)
+zmail/config.json
+
+# Alexa skill (sensitive)
+alexa-skill/config.json
+alexa-skill/node_modules/
+alexa-skill/package-lock.json
+
+# Google Calendar skill (sensitive)
+gcal-skill/tokens/
+gcal-skill/accounts.json
+
+# Linear skill (sensitive)
+linear-skill/config.json

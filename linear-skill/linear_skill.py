@@ -184,12 +184,11 @@ def cmd_my_issues(args):
             filters.append(status_filter)
 
     filter_str = ""
-    if filters:
-        # Build filter object
-        filter_obj = filters[0] if len(filters) == 1 else {"and": filters}
-        filter_str = f", filter: {json.dumps(filter_obj).replace('\"', '')}"
-        # Fix the JSON to GraphQL conversion
-        filter_str = f", filter: {{ state: {{ type: {{ eq: \"{get_status_filter(args.status).get('state', {}).get('type', {}).get('eq', '')}\" }} }} }}" if args.status else ""
+    if filters and args.status:
+        # Get the status type for GraphQL filter
+        status_type = get_status_filter(args.status).get('state', {}).get('type', {}).get('eq', '')
+        if status_type:
+            filter_str = ', filter: {{ state: {{ type: {{ eq: "{}" }} }} }}'.format(status_type)
 
     query = f"""
     query MyIssues {{
