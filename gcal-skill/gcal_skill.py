@@ -545,6 +545,47 @@ def cmd_delete(args):
         output({"error": f"Failed to delete: {e}"})
 
 
+def cmd_update(args):
+    """Update an existing event."""
+    service, account = get_calendar_service(args.account)
+
+    try:
+        # Get existing event
+        event = service.events().get(
+            calendarId="primary",
+            eventId=args.event_id,
+        ).execute()
+
+        # Update fields if provided
+        if args.title:
+            event["summary"] = args.title
+        if args.description:
+            event["description"] = args.description
+        if args.location:
+            event["location"] = args.location
+        if args.start:
+            start_dt = parse_datetime(args.start)
+            event["start"] = {"dateTime": start_dt.isoformat(), "timeZone": str(LOCAL_TZ)}
+        if args.end:
+            end_dt = parse_datetime(args.end)
+            event["end"] = {"dateTime": end_dt.isoformat(), "timeZone": str(LOCAL_TZ)}
+
+        # Save updates
+        updated_event = service.events().update(
+            calendarId="primary",
+            eventId=args.event_id,
+            body=event,
+        ).execute()
+
+        output({
+            "success": True,
+            "account": account,
+            "event": format_event(updated_event),
+        })
+    except HttpError as e:
+        output({"error": f"Failed to update: {e}"})
+
+
 def cmd_calendars(args):
     """List available calendars."""
     service, account = get_calendar_service(args.account)
@@ -659,6 +700,16 @@ def main():
     p.add_argument("event_id", help="Event ID")
     p.add_argument("--account", "-a", help="Account email")
 
+    # update
+    p = subparsers.add_parser("update", help="Update event")
+    p.add_argument("event_id", help="Event ID")
+    p.add_argument("--title", "-t", help="New title")
+    p.add_argument("--description", "-d", help="New description")
+    p.add_argument("--location", "-l", help="New location")
+    p.add_argument("--start", "-s", help="New start time")
+    p.add_argument("--end", "-e", help="New end time")
+    p.add_argument("--account", "-a", help="Account email")
+
     # calendars
     p = subparsers.add_parser("calendars", help="List calendars")
     p.add_argument("--account", "-a", help="Account email")
@@ -689,6 +740,7 @@ def main():
         "event": cmd_event,
         "create": cmd_create,
         "delete": cmd_delete,
+        "update": cmd_update,
         "calendars": cmd_calendars,
         "search": cmd_search,
         "accounts": cmd_accounts,
