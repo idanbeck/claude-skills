@@ -154,6 +154,47 @@ def get_team_id(team_key: str) -> Optional[str]:
     return None
 
 
+def get_project_id(project_name: str, team_key: str = None) -> Optional[str]:
+    """Resolve project name to project ID."""
+    if team_key:
+        team_id = get_team_id(team_key)
+        if not team_id:
+            return None
+        query = f"""
+        query TeamProjects {{
+            team(id: "{team_id}") {{
+                projects {{
+                    nodes {{
+                        id
+                        name
+                    }}
+                }}
+            }}
+        }}
+        """
+        data = graphql_request(query)
+        projects = data.get("team", {}).get("projects", {}).get("nodes", [])
+    else:
+        query = """
+        query AllProjects {
+            projects {
+                nodes {
+                    id
+                    name
+                }
+            }
+        }
+        """
+        data = graphql_request(query)
+        projects = data.get("projects", {}).get("nodes", [])
+
+    for project in projects:
+        if project.get("name", "").lower() == project_name.lower():
+            return project.get("id")
+
+    return None
+
+
 def get_status_filter(status: str) -> Dict:
     """Convert status name to filter."""
     status_types = {
@@ -702,6 +743,14 @@ def cmd_create(args):
         if priority_val is not None:
             inputs.append(f'priority: {priority_val}')
 
+    if hasattr(args, 'project') and args.project:
+        project_id = get_project_id(args.project, args.team)
+        if project_id:
+            inputs.append(f'projectId: "{project_id}"')
+        else:
+            print(json.dumps({"error": f"Project not found: {args.project}"}))
+            return
+
     input_str = ", ".join(inputs)
 
     query = f"""
@@ -741,15 +790,16 @@ def cmd_create(args):
 
 def cmd_update(args):
     """Update an issue."""
-    # First find the issue
+    # First find the issue using issues query with filter
     search_query = f"""
     query FindIssue {{
-        issueSearch(query: "{args.issue_id}", first: 1) {{
+        issues(filter: {{ number: {{ eq: {args.issue_id.split('-')[-1]} }} }}, first: 10) {{
             nodes {{
                 id
                 identifier
                 team {{
                     id
+                    key
                     states {{
                         nodes {{
                             id
@@ -764,13 +814,19 @@ def cmd_update(args):
     """
 
     data = graphql_request(search_query)
-    issues = data.get("issueSearch", {}).get("nodes", [])
+    issues = data.get("issues", {}).get("nodes", [])
 
-    if not issues:
+    # Filter to match the exact identifier if team prefix provided
+    issue = None
+    for i in issues:
+        if i.get("identifier", "").upper() == args.issue_id.upper():
+            issue = i
+            break
+
+    if not issue:
         print(json.dumps({"error": f"Issue not found: {args.issue_id}"}))
         return
 
-    issue = issues[0]
     issue_id = issue.get("id")
 
     # Build update input
@@ -792,6 +848,14 @@ def cmd_update(args):
             inputs.append(f'stateId: "{state_id}"')
         else:
             print(json.dumps({"error": f"Status not found: {args.status}"}))
+            return
+
+    if hasattr(args, 'project') and args.project:
+        project_id = get_project_id(args.project)
+        if project_id:
+            inputs.append(f'projectId: "{project_id}"')
+        else:
+            print(json.dumps({"error": f"Project not found: {args.project}"}))
             return
 
     if not inputs:
@@ -958,12 +1022,14 @@ def main():
     sub.add_argument("-t", "--title", required=True, help="Issue title")
     sub.add_argument("-d", "--description", help="Issue description")
     sub.add_argument("-p", "--priority", help="Priority: urgent, high, medium, low, none")
+    sub.add_argument("--project", help="Project name")
     sub.set_defaults(func=cmd_create)
 
     # Update
     sub = subparsers.add_parser("update", help="Update an issue")
     sub.add_argument("issue_id", help="Issue identifier (e.g., EPO-123)")
     sub.add_argument("-s", "--status", help="New status")
+    sub.add_argument("--project", help="Move to project")
     sub.set_defaults(func=cmd_update)
 
     # Projects

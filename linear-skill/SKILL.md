@@ -85,14 +85,26 @@ python3 ~/.claude/skills/linear-skill/linear_skill.py search "query" [--limit N]
 ### Create Issue
 
 ```bash
-python3 ~/.claude/skills/linear-skill/linear_skill.py create TEAM --title "Title" [--description "Desc"] [--priority PRIORITY] [--status STATUS]
+python3 ~/.claude/skills/linear-skill/linear_skill.py create TEAM --title "Title" [--description "Desc"] [--priority PRIORITY] [--project PROJECT]
 ```
 
-### Update Issue Status
+**Arguments:**
+- `TEAM` - Team key (e.g., `EPO`)
+- `--title` / `-t` - Issue title (required)
+- `--description` / `-d` - Issue description
+- `--priority` / `-p` - Priority: `urgent`, `high`, `medium`, `low`, `none`
+- `--project` - Project name to assign issue to
+
+### Update Issue
 
 ```bash
-python3 ~/.claude/skills/linear-skill/linear_skill.py update ISSUE_ID --status STATUS
+python3 ~/.claude/skills/linear-skill/linear_skill.py update ISSUE_ID [--status STATUS] [--project PROJECT]
 ```
+
+**Arguments:**
+- `ISSUE_ID` - Issue identifier (e.g., `EPO-123`)
+- `--status` / `-s` - New status
+- `--project` - Move issue to a different project
 
 ### List Projects
 
@@ -124,6 +136,16 @@ python3 ~/.claude/skills/linear-skill/linear_skill.py search "authentication bug
 ### Quick Issue Creation
 ```bash
 python3 ~/.claude/skills/linear-skill/linear_skill.py create EPO --title "Fix login timeout" --priority high
+```
+
+### Create Issue in Project
+```bash
+python3 ~/.claude/skills/linear-skill/linear_skill.py create EPO --title "New feature" --project "Zerg AI Platform"
+```
+
+### Move Issue to Project
+```bash
+python3 ~/.claude/skills/linear-skill/linear_skill.py update EPO-123 --project "Zerg AI Platform"
 ```
 
 ## Output
