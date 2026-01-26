@@ -162,8 +162,14 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
 
-def do_oauth_flow(client_config: dict) -> dict:
-    """Perform OAuth flow with browser and local callback server."""
+def do_oauth_flow(client_config: dict, login_hint: str = None, force_consent: bool = False) -> dict:
+    """Perform OAuth flow with browser and local callback server.
+
+    Args:
+        client_config: OAuth client configuration
+        login_hint: Email address to pre-select in Google account chooser
+        force_consent: If True, force re-consent (needed for new refresh token)
+    """
     client_id = client_config["installed"]["client_id"]
     client_secret = client_config["installed"]["client_secret"]
 
@@ -185,9 +191,17 @@ def do_oauth_flow(client_config: dict) -> dict:
         "response_type": "code",
         "scope": " ".join(SCOPES),
         "access_type": "offline",
-        "prompt": "consent",
         "state": state,
     }
+
+    # Only prompt for consent when we need a new refresh token
+    if force_consent:
+        auth_params["prompt"] = "consent"
+
+    # Pre-select the account if we know which one
+    if login_hint:
+        auth_params["login_hint"] = login_hint
+
     auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(auth_params)}"
 
     # Start local server
@@ -196,7 +210,14 @@ def do_oauth_flow(client_config: dict) -> dict:
     server.auth_error = None
     server.timeout = 120  # 2 minute timeout
 
-    print(f"\nOpening browser for authentication...")
+    # Clear message about which account
+    print("\n" + "="*50)
+    if login_hint:
+        print(f"  AUTHENTICATING: {login_hint}")
+    else:
+        print(f"  AUTHENTICATING: New account")
+    print("="*50)
+    print(f"Opening browser - select the account above.")
     print(f"If browser doesn't open, visit:\n{auth_url}\n")
 
     # Open browser
@@ -225,6 +246,12 @@ def do_oauth_flow(client_config: dict) -> dict:
         sys.exit(1)
 
     tokens = response.json()
+
+    # Calculate and store absolute expiry time
+    if "expires_in" in tokens:
+        from datetime import timedelta
+        expiry = datetime.utcnow() + timedelta(seconds=tokens["expires_in"])
+        tokens["expiry"] = expiry.isoformat() + "Z"
 
     # Get user email
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
@@ -310,18 +337,50 @@ def list_accounts() -> list[dict]:
     return accounts
 
 
+def resolve_account_email(account: Optional[str]) -> Optional[str]:
+    """Resolve account alias (like 'epoch') to actual email address."""
+    if not account:
+        return None
+
+    # If it looks like an email, return as-is
+    if "@" in account:
+        return account
+
+    # Check if it's an alias in accounts metadata
+    meta = load_accounts_meta()
+    for email, info in meta.items():
+        if info.get("label", "").lower() == account.lower():
+            return email
+
+    return account
+
+
 def get_credentials(account: Optional[str] = None) -> Credentials:
     """Get or refresh OAuth2 credentials for an account."""
     client_config = get_client_config()
-    token_path = get_token_path(account)
+
+    # Resolve alias to email first
+    account_email = resolve_account_email(account)
+    token_path = get_token_path(account_email or account)
 
     creds = None
+    stored_email = None
 
     # Load existing token
     if token_path.exists():
         try:
             with open(token_path) as f:
                 token_data = json.load(f)
+
+            stored_email = token_data.get("email")
+
+            # Parse expiry if stored
+            expiry = None
+            if "expiry" in token_data:
+                try:
+                    expiry = datetime.fromisoformat(token_data["expiry"].replace("Z", "+00:00"))
+                except:
+                    pass
 
             creds = Credentials(
                 token=token_data.get("access_token"),
@@ -330,33 +389,36 @@ def get_credentials(account: Optional[str] = None) -> Credentials:
                 client_id=client_config["installed"]["client_id"],
                 client_secret=client_config["installed"]["client_secret"],
                 scopes=SCOPES,
+                expiry=expiry,
             )
         except Exception as e:
             print(f"Warning: Could not load existing token: {e}")
 
     # Refresh or get new credentials
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+        # Try refresh if we have a refresh token
+        if creds and creds.refresh_token:
             try:
                 creds.refresh(Request())
-                # Update stored token
+                # Update stored token with new access token and expiry
                 with open(token_path) as f:
                     token_data = json.load(f)
                 token_data["access_token"] = creds.token
+                if creds.expiry:
+                    token_data["expiry"] = creds.expiry.isoformat()
                 with open(token_path, "w") as f:
                     json.dump(token_data, f, indent=2)
+                return creds  # Success - return refreshed creds
             except Exception as e:
                 print(f"Token refresh failed, re-authenticating: {e}")
                 creds = None
 
         if not creds:
-            # Need new authentication
-            if account:
-                print(f"Authenticating account: {account}")
-            else:
-                print("No authenticated account found. Starting authentication...")
+            # Need new authentication - use stored email or resolved email for login_hint
+            login_email = stored_email or account_email
+            force_consent = True  # First time always needs consent for refresh token
 
-            token_data = do_oauth_flow(client_config)
+            token_data = do_oauth_flow(client_config, login_hint=login_email, force_consent=force_consent)
 
             # Save token
             token_path = get_token_path(token_data.get("email", account))
