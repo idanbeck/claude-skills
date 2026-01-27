@@ -43,6 +43,20 @@ CONFIG_FILE = SKILL_DIR / "config.json"
 MESSAGE_LINE_WIDTH = 72
 
 
+def markdown_to_mrkdwn(text: str) -> str:
+    """Convert markdown formatting to Slack mrkdwn format.
+
+    Conversions:
+    - **bold** or __bold__ → *bold*
+    - *italic* (when not bold) → _italic_
+    """
+    # Convert **bold** to *bold*
+    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    # Convert __bold__ to *bold*
+    text = re.sub(r'__(.+?)__', r'*\1*', text)
+    return text
+
+
 def load_config() -> Dict:
     """Load workspace configurations."""
     if not CONFIG_FILE.exists():
@@ -314,10 +328,13 @@ def cmd_send(args):
         print(json.dumps({"error": f"Channel/user not found: {args.channel}"}))
         return
 
+    # Convert markdown to Slack mrkdwn
+    message_text = markdown_to_mrkdwn(args.message)
+
     try:
         kwargs = {
             "channel": channel_id,
-            "text": args.message,
+            "text": message_text,
         }
 
         if args.thread_ts:
@@ -358,11 +375,14 @@ def cmd_edit(args):
         print(json.dumps({"error": f"Channel/user not found: {args.channel}"}))
         return
 
+    # Convert markdown to Slack mrkdwn
+    message_text = markdown_to_mrkdwn(args.message)
+
     try:
         result = client.chat_update(
             channel=channel_id,
             ts=args.ts,
-            text=args.message,
+            text=message_text,
         )
 
         print(json.dumps({
