@@ -43,3 +43,14 @@ gcal-skill/accounts.json
 
 # Linear skill (sensitive)
 linear-skill/config.json
+
+# LinkedIn skill (sensitive)
+linkedin-skill/credentials.json
+linkedin-skill/tokens/
+linkedin-skill/accounts.json
+
+# Gamma skill (sensitive)
+gamma-skill/config.json
+
+# Notion skill (sensitive)
+notion-skill/config.json
