@@ -161,6 +161,28 @@ def format_message(msg: Dict, users_cache: Dict = None) -> Dict:
     if users_cache and user_id in users_cache:
         user_name = users_cache[user_id]
 
+    # Extract file attachments
+    files = []
+    for f in msg.get("files", []):
+        file_info = {
+            "id": f.get("id"),
+            "name": f.get("name"),
+            "title": f.get("title"),
+            "mimetype": f.get("mimetype"),
+            "filetype": f.get("filetype"),
+            "size": f.get("size"),
+            "url_private": f.get("url_private"),
+            "url_private_download": f.get("url_private_download"),
+            "thumb_360": f.get("thumb_360"),
+            "thumb_480": f.get("thumb_480"),
+            "thumb_720": f.get("thumb_720"),
+            "thumb_800": f.get("thumb_800"),
+            "thumb_1024": f.get("thumb_1024"),
+            "permalink": f.get("permalink"),
+        }
+        # Remove None values
+        files.append({k: v for k, v in file_info.items() if v is not None})
+
     return {
         "ts": msg.get("ts"),
         "time": format_timestamp(msg.get("ts", "")),
@@ -173,6 +195,7 @@ def format_message(msg: Dict, users_cache: Dict = None) -> Dict:
             {"name": r["name"], "count": r["count"]}
             for r in msg.get("reactions", [])
         ] if msg.get("reactions") else None,
+        "files": files if files else None,
     }
 
 
@@ -625,6 +648,54 @@ def cmd_scan(args):
         print(result.stderr, file=sys.stderr)
 
 
+def cmd_download(args):
+    """Download a file from Slack."""
+    import urllib.request
+
+    client, workspace = get_client(args.workspace)
+
+    try:
+        # Get file info
+        result = client.files_info(file=args.file_id)
+        file_info = result["file"]
+
+        url = file_info.get("url_private_download") or file_info.get("url_private")
+        if not url:
+            print(json.dumps({"error": "No download URL available for this file"}))
+            return
+
+        # Determine output path
+        if args.output:
+            output_path = Path(args.output).expanduser()
+        else:
+            output_path = Path("/tmp") / file_info.get("name", f"slack_file_{args.file_id}")
+
+        # Download with auth header
+        config = load_config()
+        ws_config = config.get(args.workspace) or config.get("default") or next(iter(config.values()))
+        token = ws_config.get("token")
+
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+
+        with urllib.request.urlopen(req) as response:
+            with open(output_path, "wb") as f:
+                f.write(response.read())
+
+        print(json.dumps({
+            "success": True,
+            "workspace": workspace,
+            "file_id": args.file_id,
+            "name": file_info.get("name"),
+            "mimetype": file_info.get("mimetype"),
+            "size": file_info.get("size"),
+            "output_path": str(output_path),
+        }, indent=2))
+
+    except SlackApiError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
 # ============ Main ============
 
 def main():
@@ -713,6 +784,13 @@ def main():
     sub.add_argument("-w", "--workspace", help="Workspace to use")
     sub.add_argument("--workdir", help="Working directory for Claude Code")
     sub.set_defaults(func=cmd_scan)
+
+    # Download
+    sub = subparsers.add_parser("download", help="Download a file from Slack")
+    sub.add_argument("file_id", help="File ID to download")
+    sub.add_argument("-o", "--output", help="Output path (default: /tmp/<filename>)")
+    sub.add_argument("-w", "--workspace", help="Workspace to use")
+    sub.set_defaults(func=cmd_download)
 
     args = parser.parse_args()
 
