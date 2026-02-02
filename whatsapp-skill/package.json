@@ -1,0 +1,13 @@
+{
+  "name": "whatsapp-skill",
+  "version": "1.0.0",
+  "description": "WhatsApp automation via WhatsApp Web",
+  "main": "whatsapp_skill.js",
+  "scripts": {
+    "start": "node whatsapp_skill.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
