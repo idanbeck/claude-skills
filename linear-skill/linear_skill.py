@@ -15,6 +15,7 @@ Usage:
     python linear_skill.py create TEAM --title "Title" [--description "Desc"] [--priority P]
     python linear_skill.py update ISSUE_ID --status STATUS
     python linear_skill.py projects [TEAM]
+    python linear_skill.py reorder ISSUE1 ISSUE2 ISSUE3...
 """
 
 import argparse
@@ -899,6 +900,106 @@ def cmd_update(args):
         print(json.dumps({"success": False, "error": "Failed to update issue"}))
 
 
+def get_issue_id(identifier: str) -> Optional[str]:
+    """Resolve issue identifier (e.g., EPO-123) to internal ID."""
+    # Try to extract team prefix and number
+    parts = identifier.upper().split('-')
+    if len(parts) != 2:
+        return None
+
+    team_prefix, number = parts
+
+    try:
+        issue_num = int(number)
+    except ValueError:
+        return None
+
+    query = f"""
+    query FindIssue {{
+        issues(filter: {{ number: {{ eq: {issue_num} }} }}, first: 10) {{
+            nodes {{
+                id
+                identifier
+            }}
+        }}
+    }}
+    """
+
+    data = graphql_request(query)
+    issues = data.get("issues", {}).get("nodes", [])
+
+    for issue in issues:
+        if issue.get("identifier", "").upper() == identifier.upper():
+            return issue.get("id")
+
+    return None
+
+
+def cmd_reorder(args):
+    """Reorder issues within their lane (set sortOrder)."""
+    if not args.issues or len(args.issues) < 1:
+        print(json.dumps({"error": "At least one issue identifier required"}))
+        return
+
+    results = []
+    errors = []
+
+    # Process each issue, assigning sortOrder based on position
+    # Lower sortOrder = higher in list
+    # Start at a base value and increment
+    base_sort = args.base if hasattr(args, 'base') and args.base else 0.0
+    increment = args.increment if hasattr(args, 'increment') and args.increment else 1.0
+
+    for idx, identifier in enumerate(args.issues):
+        issue_id = get_issue_id(identifier)
+
+        if not issue_id:
+            errors.append({"identifier": identifier, "error": "Issue not found"})
+            continue
+
+        sort_order = base_sort + (idx * increment)
+
+        # Update the issue's sortOrder
+        update_query = f"""
+        mutation UpdateSortOrder {{
+            issueUpdate(id: "{issue_id}", input: {{ sortOrder: {sort_order} }}) {{
+                success
+                issue {{
+                    id
+                    identifier
+                    title
+                    sortOrder
+                }}
+            }}
+        }}
+        """
+
+        data = graphql_request(update_query)
+        result = data.get("issueUpdate", {})
+
+        if result.get("success"):
+            issue = result.get("issue", {})
+            results.append({
+                "identifier": issue.get("identifier"),
+                "title": issue.get("title"),
+                "sortOrder": issue.get("sortOrder"),
+                "position": idx + 1,
+            })
+        else:
+            errors.append({"identifier": identifier, "error": "Failed to update"})
+
+    output = {
+        "success": len(errors) == 0,
+        "reordered": results,
+        "total": len(results),
+    }
+
+    if errors:
+        output["errors"] = errors
+
+    print(json.dumps(output, indent=2))
+
+
 def cmd_projects(args):
     """List projects."""
     if args.team:
@@ -1036,6 +1137,13 @@ def main():
     sub = subparsers.add_parser("projects", help="List projects")
     sub.add_argument("team", nargs="?", help="Team key or name (optional)")
     sub.set_defaults(func=cmd_projects)
+
+    # Reorder
+    sub = subparsers.add_parser("reorder", help="Reorder issues (set priority within lane)")
+    sub.add_argument("issues", nargs="+", help="Issue identifiers in desired order (first = top)")
+    sub.add_argument("--base", type=float, default=0.0, help="Starting sortOrder value")
+    sub.add_argument("--increment", type=float, default=1.0, help="Increment between issues")
+    sub.set_defaults(func=cmd_reorder)
 
     args = parser.parse_args()
 

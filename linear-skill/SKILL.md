@@ -106,6 +106,25 @@ python3 ~/.claude/skills/linear-skill/linear_skill.py update ISSUE_ID [--status 
 - `--status` / `-s` - New status
 - `--project` - Move issue to a different project
 
+### Reorder Issues
+
+```bash
+python3 ~/.claude/skills/linear-skill/linear_skill.py reorder ISSUE1 ISSUE2 ISSUE3...
+```
+
+Reorder issues within their lane by setting `sortOrder`. Issues are listed in priority order (first = top of list).
+
+**Arguments:**
+- `ISSUE1 ISSUE2...` - Issue identifiers in desired order
+- `--base` - Starting sortOrder value (default: 0.0)
+- `--increment` - Increment between issues (default: 1.0)
+
+**Example:**
+```bash
+# Reorder In Progress lane: EPO-485 at top, then EPO-480, then EPO-397
+python3 ~/.claude/skills/linear-skill/linear_skill.py reorder EPO-485 EPO-480 EPO-397
+```
+
 ### List Projects
 
 ```bash
