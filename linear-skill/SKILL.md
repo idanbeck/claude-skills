@@ -157,6 +157,15 @@ python3 ~/.claude/skills/linear-skill/linear_skill.py search "authentication bug
 python3 ~/.claude/skills/linear-skill/linear_skill.py create EPO --title "Fix login timeout" --priority high
 ```
 
+### Board Grooming (Reorder Lanes)
+```bash
+# Reorder In Progress by priority
+python3 ~/.claude/skills/linear-skill/linear_skill.py reorder EPO-485 EPO-480 EPO-397 EPO-457
+
+# Reorder Todo backlog
+python3 ~/.claude/skills/linear-skill/linear_skill.py reorder EPO-435 EPO-472 EPO-451
+```
+
 ### Create Issue in Project
 ```bash
 python3 ~/.claude/skills/linear-skill/linear_skill.py create EPO --title "New feature" --project "Zerg AI Platform"
