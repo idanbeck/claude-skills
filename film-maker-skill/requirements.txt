@@ -1,0 +1,2 @@
+# Film maker skill uses other skills and ffmpeg
+# No additional Python dependencies required
