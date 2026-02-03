@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Film Maker Skill - Orchestrate AI film production using Nano Banana, Eleven Labs, Higgsfield, and FFmpeg."""
+"""Film Maker Skill - Orchestrate AI film production using Nano Banana, Eleven Labs, FAL (Kling/Luma), and FFmpeg."""
 
 import argparse
 import json
@@ -61,7 +61,7 @@ def check_dependencies():
     required_skills = [
         ("nano-banana-pro", "Image generation"),
         ("eleven-labs-skill", "Voice/audio generation"),
-        ("higgsfield-skill", "Video generation"),
+        ("fal-video-skill", "Video generation (Kling, Luma, etc.)"),
     ]
 
     for skill_dir, description in required_skills:
@@ -90,7 +90,7 @@ def cmd_check(args):
         output({
             "status": "ready",
             "message": "All dependencies available",
-            "skills": ["nano-banana-pro", "eleven-labs-skill", "higgsfield-skill"],
+            "skills": ["nano-banana-pro", "eleven-labs-skill", "fal-video-skill"],
             "tools": ["ffmpeg"]
         })
 
@@ -245,20 +245,42 @@ def cmd_generate_audio(args):
 
 
 def cmd_animate(args):
-    """Animate an image using higgsfield."""
+    """Animate an image using FAL (Kling, Luma, etc.)."""
     if not args.image:
         output({"error": "Image path required"})
         return
 
-    hf_args = ["i2v", args.image]
-    if args.prompt:
-        hf_args.extend(["--prompt", args.prompt])
-    if args.duration:
-        hf_args.extend(["--duration", str(args.duration)])
-    if args.motion:
-        hf_args.extend(["--motion", str(args.motion)])
+    # Find project directory to save output
+    project_dir = None
+    if args.project:
+        if PROJECTS_DIR.exists():
+            for p in PROJECTS_DIR.iterdir():
+                if args.project.lower() in p.name.lower():
+                    project_dir = p
+                    break
 
-    result = run_skill("higgsfield-skill", hf_args)
+    # Build FAL video skill args
+    fal_args = ["i2v", args.image]
+    if args.prompt:
+        fal_args.extend(["--prompt", args.prompt])
+    if args.duration:
+        fal_args.extend(["--duration", str(args.duration)])
+    if args.model:
+        fal_args.extend(["--model", args.model])
+
+    # If project specified, output directly to project video folder
+    if project_dir:
+        timestamp = datetime.now().strftime("%H%M%S")
+        output_path = project_dir / "video" / f"clip_{timestamp}.mp4"
+        fal_args.extend(["--output", str(output_path)])
+
+    result = run_skill("fal-video-skill", fal_args)
+
+    # Add project info to result
+    if project_dir and "file" in result:
+        result["project"] = str(project_dir)
+        result["project_file"] = result.get("file")
+
     output(result)
 
 
@@ -489,8 +511,9 @@ def main():
     animate_parser = subparsers.add_parser("animate", help="Animate an image")
     animate_parser.add_argument("image", nargs="?", help="Image path")
     animate_parser.add_argument("--prompt", "-p", help="Motion prompt")
-    animate_parser.add_argument("--duration", "-d", type=int, default=4, help="Duration")
-    animate_parser.add_argument("--motion", "-m", type=float, default=0.5, help="Motion strength")
+    animate_parser.add_argument("--duration", "-d", type=int, default=5, help="Duration in seconds")
+    animate_parser.add_argument("--model", "-m", default="kling", help="Model: kling, kling-pro, luma, minimax")
+    animate_parser.add_argument("--project", help="Project name (auto-saves to video folder)")
 
     # Assemble
     assemble_parser = subparsers.add_parser("assemble", help="Assemble final film")

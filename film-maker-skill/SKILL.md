@@ -1,6 +1,6 @@
 # Film Maker Skill
 
-Orchestrate AI film production using Nano Banana (images), Eleven Labs (audio), Higgsfield (video), and FFmpeg (assembly).
+Orchestrate AI film production using Nano Banana (images), Eleven Labs (audio), FAL (video), and FFmpeg (assembly).
 
 ## Overview
 
@@ -13,7 +13,7 @@ Script/Idea
     ↓
 [eleven-labs] → Voiceover / dialogue / SFX
     ↓
-[higgsfield] → Animate frames into video
+[fal-video] → Animate frames into video (Kling, Luma, etc.)
     ↓
 [ffmpeg] → Assemble final film
 ```
@@ -23,7 +23,7 @@ Script/Idea
 ### Required Skills
 - `nano-banana-pro` - Image generation
 - `eleven-labs-skill` - Voice/audio generation
-- `higgsfield-skill` - Video generation
+- `fal-video-skill` - Video generation (Kling, Luma, Minimax, etc.)
 
 ### Required Tools
 - `ffmpeg` - Video assembly (install via `brew install ffmpeg`)
@@ -64,10 +64,19 @@ python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py audio \
 
 ### 4. Animate Frames
 ```bash
+# Using Kling (default, best quality)
 python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py animate \
     projects/my_epic_*/images/frame_001.png \
     --prompt "slow camera push in, dust particles floating" \
-    --duration 5
+    --duration 5 \
+    --project my_epic
+
+# Using Luma
+python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py animate \
+    projects/my_epic_*/images/frame_001.png \
+    --model luma \
+    --prompt "gentle parallax movement" \
+    --project my_epic
 ```
 
 ### 5. Assemble Final Film
@@ -105,8 +114,22 @@ python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py audio --sfx "explo
 
 ### Animate Image to Video
 ```bash
+# Default (Kling)
 python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py animate image.png --prompt "motion description"
+
+# With model selection
+python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py animate image.png --model kling-pro --prompt "cinematic motion"
+python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py animate image.png --model luma --prompt "dreamy movement"
+
+# Auto-save to project
+python3 ~/.claude/skills/film-maker-skill/film_maker_skill.py animate image.png --prompt "motion" --project my_film
 ```
+
+**Available video models:**
+- `kling` - Best quality (default)
+- `kling-pro` - Highest quality, slower
+- `luma` - Luma Dream Machine, artistic
+- `minimax` - Good for longer clips
 
 ### Assemble Final Film
 ```bash
@@ -147,11 +170,13 @@ projects/
 - Generate dialogue first, then ambient sounds
 - Use shorter SFX clips and loop them in post
 
-### Motion Prompts
+### Motion Prompts (for animate command)
 Good animation prompts:
 - "subtle camera drift to the right"
 - "character blinks and turns head slowly"
 - "clouds moving in background, gentle movement"
+- "slow zoom in, atmospheric"
+- "parallax depth effect, foreground/background separation"
 
 Avoid:
 - Vague prompts like "make it move"
@@ -167,6 +192,11 @@ Avoid:
 After assembly, add background music:
 ```bash
 ffmpeg -i film.mp4 -i music.mp3 -c:v copy -c:a aac -shortest final_with_music.mp4
+```
+
+Or generate music with Suno:
+```bash
+python3 ~/.claude/skills/suno-music/suno_skill.py generate "epic cinematic orchestral" --instrumental
 ```
 
 ## Example: 30-Second Film
@@ -186,8 +216,9 @@ python3 film_maker_skill.py frame "fade to white, peaceful ending" --project daw
 # 3. Generate voiceover
 python3 film_maker_skill.py audio --text "Every day brings new light. New hope. New beginnings." --voice "Josh" --project dawn
 
-# 4. Animate each frame (manually run for each)
-python3 film_maker_skill.py animate projects/dawn_*/images/frame_1.png --prompt "slow zoom out, mist rising" --duration 5
+# 4. Animate each frame (with auto-save to project)
+python3 film_maker_skill.py animate projects/dawn_*/images/frame_1.png --prompt "slow zoom out, mist rising" --project dawn
+# ... repeat for each frame
 
 # 5. Assemble
 python3 film_maker_skill.py assemble dawn
@@ -199,6 +230,12 @@ python3 film_maker_skill.py assemble dawn
 # Core dependencies are in the individual skills
 # This skill just needs Python 3.9+ and ffmpeg
 ```
+
+## API Keys Required
+
+- **Eleven Labs**: Set up in eleven-labs-skill
+- **FAL**: Set up in fal-video-skill (`python3 fal_video_skill.py config YOUR_KEY`)
+- **Gemini** (for nano-banana): Set up in nano-banana-pro
 
 ## Security Notes
 

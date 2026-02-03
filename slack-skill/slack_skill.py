@@ -421,6 +421,33 @@ def cmd_edit(args):
         print(json.dumps({"success": False, "error": str(e)}))
 
 
+def cmd_delete(args):
+    """Delete a message."""
+    client, workspace = get_client(args.workspace)
+
+    channel_id, channel_name = resolve_channel(client, args.channel)
+    if not channel_id:
+        print(json.dumps({"error": f"Channel/user not found: {args.channel}"}))
+        return
+
+    try:
+        result = client.chat_delete(
+            channel=channel_id,
+            ts=args.ts,
+        )
+
+        print(json.dumps({
+            "success": True,
+            "workspace": workspace,
+            "channel": channel_name,
+            "channel_id": channel_id,
+            "deleted_ts": args.ts,
+        }, indent=2))
+
+    except SlackApiError as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+
+
 def cmd_search(args):
     """Search messages."""
     client, workspace = get_client(args.workspace)
@@ -740,6 +767,13 @@ def main():
     sub.add_argument("-m", "--message", required=True, help="New message text")
     sub.add_argument("-w", "--workspace", help="Workspace to use")
     sub.set_defaults(func=cmd_edit)
+
+    # Delete
+    sub = subparsers.add_parser("delete", help="Delete a message")
+    sub.add_argument("channel", help="Channel (#name or ID)")
+    sub.add_argument("ts", help="Message timestamp to delete")
+    sub.add_argument("-w", "--workspace", help="Workspace to use")
+    sub.set_defaults(func=cmd_delete)
 
     # Search
     sub = subparsers.add_parser("search", help="Search messages")
