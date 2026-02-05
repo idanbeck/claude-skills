@@ -54,3 +54,21 @@ gamma-skill/config.json
 
 # Notion skill (sensitive)
 notion-skill/config.json
+
+# CRM Bridge (sensitive)
+crm-bridge/config.json
+crm-bridge/.bridge.pid
+crm-bridge/bridge.log
+crm-bridge/backup_msg-*.txt
+
+# ElevenLabs skill (sensitive)
+eleven-labs-skill/config.json
+
+# Blink skill (sensitive)
+blink-skill/credentials.json
+blink-skill/snapshots/
+
+# Playwright skill (sensitive/state)
+playwright-skill/browser_state.json
+playwright-skill/sessions/
+playwright-skill/screenshots/

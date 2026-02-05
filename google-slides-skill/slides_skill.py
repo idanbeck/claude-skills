@@ -12,6 +12,10 @@ Usage:
     python slides_skill.py add-image PRESENTATION_ID --slide-id ID --url URL [--x X] [--y Y] [--w W] [--h H]
     python slides_skill.py replace-text PRESENTATION_ID --find "old" --replace "new"
     python slides_skill.py export PRESENTATION_ID [--format pdf|pptx] [--output FILE]
+    python slides_skill.py comments PRESENTATION_ID [--account EMAIL]
+    python slides_skill.py add-comment PRESENTATION_ID --content "..." [--slide N] [--account EMAIL]
+    python slides_skill.py resolve-comment PRESENTATION_ID --comment-id ID [--message MSG]
+    python slides_skill.py delete-comment PRESENTATION_ID --comment-id ID [--account EMAIL]
     python slides_skill.py accounts
     python slides_skill.py login [--account EMAIL]
     python slides_skill.py logout [--account EMAIL]
@@ -305,6 +309,134 @@ def cmd_export(args):
     print(json.dumps({"success": True, "file": output}, indent=2))
 
 
+def cmd_comments(args):
+    """List all comments on a presentation."""
+    drive = get_drive_service(args.account)
+
+    comments = []
+    page_token = None
+
+    while True:
+        response = drive.comments().list(
+            fileId=args.presentation_id,
+            fields="comments(id,content,author(displayName,emailAddress),createdTime,modifiedTime,resolved,quotedFileContent,anchor,replies(id,content,author(displayName,emailAddress),createdTime))",
+            pageSize=100,
+            pageToken=page_token,
+            includeDeleted=False
+        ).execute()
+
+        for comment in response.get("comments", []):
+            # Parse anchor to extract slide number if available
+            anchor = comment.get("anchor", "")
+            slide_number = None
+            if anchor:
+                # Anchor format for slides: {"r":0} where r is 0-indexed slide number
+                try:
+                    import re
+                    match = re.search(r'"r":\s*(\d+)', anchor)
+                    if match:
+                        slide_number = int(match.group(1)) + 1  # Convert to 1-indexed
+                except:
+                    pass
+
+            comments.append({
+                "id": comment.get("id"),
+                "content": comment.get("content"),
+                "author": comment.get("author", {}).get("displayName"),
+                "authorEmail": comment.get("author", {}).get("emailAddress"),
+                "createdTime": comment.get("createdTime"),
+                "modifiedTime": comment.get("modifiedTime"),
+                "resolved": comment.get("resolved", False),
+                "slideNumber": slide_number,
+                "quotedContent": comment.get("quotedFileContent", {}).get("value"),
+                "replies": [{
+                    "id": r.get("id"),
+                    "content": r.get("content"),
+                    "author": r.get("author", {}).get("displayName"),
+                    "authorEmail": r.get("author", {}).get("emailAddress"),
+                    "createdTime": r.get("createdTime"),
+                } for r in comment.get("replies", [])]
+            })
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    print(json.dumps({
+        "presentationId": args.presentation_id,
+        "comments": comments,
+        "total": len(comments)
+    }, indent=2))
+
+
+def cmd_add_comment(args):
+    """Add a comment to a presentation."""
+    drive = get_drive_service(args.account)
+
+    body = {
+        "content": args.content
+    }
+
+    # If slide number specified, create anchor
+    if args.slide:
+        # Anchor format for Google Slides: slide index is 0-based
+        body["anchor"] = json.dumps({"r": args.slide - 1})
+
+    result = drive.comments().create(
+        fileId=args.presentation_id,
+        fields="id,content,author(displayName),createdTime,anchor",
+        body=body
+    ).execute()
+
+    print(json.dumps({
+        "success": True,
+        "commentId": result.get("id"),
+        "content": result.get("content"),
+        "author": result.get("author", {}).get("displayName"),
+        "createdTime": result.get("createdTime"),
+        "slideNumber": args.slide
+    }, indent=2))
+
+
+def cmd_resolve_comment(args):
+    """Resolve (mark as addressed) a comment."""
+    drive = get_drive_service(args.account)
+
+    # To resolve a comment in Drive API, we create a reply with action=resolve
+    result = drive.replies().create(
+        fileId=args.presentation_id,
+        commentId=args.comment_id,
+        fields="id,content,author(displayName),createdTime",
+        body={
+            "content": args.message or "Resolved",
+            "action": "resolve"
+        }
+    ).execute()
+
+    print(json.dumps({
+        "success": True,
+        "commentId": args.comment_id,
+        "resolved": True,
+        "replyId": result.get("id")
+    }, indent=2))
+
+
+def cmd_delete_comment(args):
+    """Delete a comment from a presentation."""
+    drive = get_drive_service(args.account)
+
+    drive.comments().delete(
+        fileId=args.presentation_id,
+        commentId=args.comment_id
+    ).execute()
+
+    print(json.dumps({
+        "success": True,
+        "commentId": args.comment_id,
+        "deleted": True
+    }, indent=2))
+
+
 def add_account_arg(p):
     p.add_argument("--account", "-a")
 
@@ -385,6 +517,32 @@ def main():
     export.add_argument("--output", "-o")
     add_account_arg(export)
     export.set_defaults(func=cmd_export)
+
+    # Comment commands
+    comments = subs.add_parser("comments")
+    comments.add_argument("presentation_id")
+    add_account_arg(comments)
+    comments.set_defaults(func=cmd_comments)
+
+    add_comment = subs.add_parser("add-comment")
+    add_comment.add_argument("presentation_id")
+    add_comment.add_argument("--content", "-c", required=True, help="Comment text")
+    add_comment.add_argument("--slide", "-s", type=int, help="Slide number (1-indexed)")
+    add_account_arg(add_comment)
+    add_comment.set_defaults(func=cmd_add_comment)
+
+    resolve = subs.add_parser("resolve-comment")
+    resolve.add_argument("presentation_id")
+    resolve.add_argument("--comment-id", required=True, help="Comment ID to resolve")
+    resolve.add_argument("--message", "-m", help="Resolution message")
+    add_account_arg(resolve)
+    resolve.set_defaults(func=cmd_resolve_comment)
+
+    delete_comment = subs.add_parser("delete-comment")
+    delete_comment.add_argument("presentation_id")
+    delete_comment.add_argument("--comment-id", required=True, help="Comment ID to delete")
+    add_account_arg(delete_comment)
+    delete_comment.set_defaults(func=cmd_delete_comment)
 
     args = parser.parse_args()
     if not args.command:
