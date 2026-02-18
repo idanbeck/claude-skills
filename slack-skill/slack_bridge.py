@@ -31,7 +31,7 @@ from threading import Event, Thread
 AUTO_RESPOND = False
 WORK_DIR = None
 ALLOWED_USERS = {"U04R0EJACMR"}  # Idan only - add user IDs to allow others
-USER_SESSIONS = {}  # Track session IDs per user for continuity
+THREAD_SESSIONS = {}  # Track Claude Code session IDs per thread: {session_key: session_id}
 ACTIVE_THREADS = {}  # Track threads we've posted to: {thread_ts: {channel, last_response_ts}}
 PENDING_WORK = {}  # Track messages with hourglass: {(channel, ts): {"start_time": float, "text": str, ...}}
 PENDING_WORK_FILE = None  # Set after SKILL_DIR is defined
@@ -42,6 +42,9 @@ EMOJI_DONE = "white_check_mark"
 EMOJI_ACK = "eyes"
 EMOJI_ERROR = "x"
 EMOJI_RETRY = "arrows_counterclockwise"
+
+# No-response sentinel - Claude can return this to skip posting
+NO_RESPONSE_SENTINEL = "[NO_RESPONSE]"
 
 # Timeout for stuck work items (seconds)
 WORK_TIMEOUT = 300  # 5 minutes
@@ -64,6 +67,42 @@ CONFIG_FILE = SKILL_DIR / "config.json"
 INBOX_FILE = SKILL_DIR / "inbox.jsonl"
 PID_FILE = SKILL_DIR / ".bridge.pid"
 PENDING_WORK_FILE = SKILL_DIR / "pending_work.json"  # For persistent pending work tracking
+THREAD_SESSIONS_FILE = SKILL_DIR / "thread_sessions.json"  # For persistent thread session tracking
+
+
+def get_session_key(channel_id: str, thread_ts: str = None) -> str:
+    """Generate a unique session key for a channel/thread combination.
+
+    - DMs without thread: channel_id:main (one continuous conversation per DM)
+    - DMs with thread: channel_id:thread_ts (isolated per thread)
+    - Channel threads: channel_id:thread_ts (isolated per thread)
+    - New channel mentions: channel_id:message_ts (starts fresh)
+    """
+    if thread_ts:
+        return f"{channel_id}:{thread_ts}"
+    return f"{channel_id}:main"
+
+
+def load_thread_sessions():
+    """Load thread sessions from file."""
+    global THREAD_SESSIONS
+    if THREAD_SESSIONS_FILE.exists():
+        try:
+            with open(THREAD_SESSIONS_FILE) as f:
+                THREAD_SESSIONS = json.load(f)
+                print(f"[STARTUP] Loaded {len(THREAD_SESSIONS)} thread sessions")
+        except Exception as e:
+            print(f"[STARTUP] Error loading thread sessions: {e}")
+            THREAD_SESSIONS = {}
+
+
+def save_thread_sessions():
+    """Save thread sessions to file."""
+    try:
+        with open(THREAD_SESSIONS_FILE, "w") as f:
+            json.dump(THREAD_SESSIONS, f)
+    except Exception as e:
+        print(f"[ERROR] Failed to save thread sessions: {e}")
 
 
 def load_config():
@@ -91,8 +130,16 @@ def write_to_inbox(message: dict):
 
 def run_claude_code(prompt: str, user_name: str, channel_name: str, user_id: str,
                      channel_id: str = None, thread_ts: str = None) -> str:
-    """Run Claude Code with a prompt and return the response."""
-    global WORK_DIR, USER_SESSIONS
+    """Run Claude Code with a prompt and return the response.
+
+    Each channel/thread gets its own isolated Claude Code session.
+    Sessions are tracked and resumed so each thread maintains its own context.
+    """
+    global WORK_DIR, THREAD_SESSIONS
+
+    # Compute session key for this channel/thread
+    session_key = get_session_key(channel_id or "unknown", thread_ts)
+    existing_session_id = THREAD_SESSIONS.get(session_key)
 
     # Build thread context for uploads
     thread_flag = f" -t {thread_ts}" if thread_ts else ""
@@ -100,7 +147,7 @@ def run_claude_code(prompt: str, user_name: str, channel_name: str, user_id: str
 
     # Build context-aware prompt (only for new sessions)
     # For continuing sessions, just send the message directly
-    if user_id in USER_SESSIONS:
+    if existing_session_id:
         full_prompt = prompt
     else:
         full_prompt = f"""You are responding to Slack messages from {user_name}. Keep responses concise and conversational (Slack-appropriate).
@@ -108,6 +155,15 @@ def run_claude_code(prompt: str, user_name: str, channel_name: str, user_id: str
 You have full access to this workspace including Obsidian vault, skills, and tools. You can read files, send emails, etc.
 
 When the user confirms something (like "yes", "do it", "send it"), execute the action you proposed.
+
+CHOOSING NOT TO RESPOND:
+You do NOT need to respond to every message. If the message:
+- Isn't directed at you or doesn't need your input
+- Is just chatter between other people
+- Is a statement that doesn't warrant a reply
+- Would be better left alone
+Then respond with EXACTLY: {NO_RESPONSE_SENTINEL}
+Only respond when you genuinely have something useful to add. When in doubt, don't respond.
 
 IMPORTANT CONTEXT:
 - Channel ID: {channel_for_upload}
@@ -121,35 +177,57 @@ IMAGE GENERATION: If the user asks for an image, picture, or visual:
 First message: {prompt}"""
 
     try:
-        cmd = ["claude", "-p", "--dangerously-skip-permissions"]
+        cmd = ["claude", "-p", "--output-format", "json", "--dangerously-skip-permissions"]
 
-        # Continue existing session if we have one for this user
-        if user_id in USER_SESSIONS:
-            cmd.extend(["--continue"])
+        # Resume existing thread session if we have one
+        if existing_session_id:
+            cmd.extend(["--resume", existing_session_id])
 
         cmd.append(full_prompt)
+
+        # Strip CLAUDECODE env var to avoid nested session detection
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+        env.pop("CLAUDE_CODE_SESSION", None)
 
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             cwd=WORK_DIR,
+            env=env,
             timeout=600,  # 10 minute timeout for image generation tasks
         )
 
-        # Try to extract session ID from output for future continuation
-        # Claude Code outputs session info we could parse
+        raw_output = result.stdout.strip()
 
-        response = result.stdout.strip()
+        # Parse JSON response to extract session_id and result text
+        response = ""
+        try:
+            response_data = json.loads(raw_output)
+            response = response_data.get("result", "")
+            new_session_id = response_data.get("session_id")
+
+            # Store session ID for this thread
+            if new_session_id:
+                THREAD_SESSIONS[session_key] = new_session_id
+                save_thread_sessions()
+                print(f"  [Session tracked: {session_key} -> {new_session_id[:12]}...]")
+        except json.JSONDecodeError:
+            # Fallback: if JSON parsing fails, treat as raw text
+            response = raw_output
+            # If we had an existing session that failed, clear it so next attempt starts fresh
+            if existing_session_id:
+                print(f"  [Session {existing_session_id[:12]}... may be stale, clearing]")
+                THREAD_SESSIONS.pop(session_key, None)
+                save_thread_sessions()
+
         if not response and result.stderr:
             response = f"Error: {result.stderr[:500]}"
 
         # Strip thinking tags from response
         response = re.sub(r'<thinking>.*?</thinking>\s*', '', response, flags=re.DOTALL)
         response = response.strip()
-
-        # Mark that this user has an active session
-        USER_SESSIONS[user_id] = True
 
         return response or "I processed that but have no response."
     except subprocess.TimeoutExpired:
@@ -279,6 +357,12 @@ def remove_reaction(web_client: WebClient, channel: str, ts: str, emoji: str):
         # Ignore "no_reaction" errors
         if "no_reaction" not in str(e):
             print(f"Error removing reaction: {e}")
+
+
+def is_no_response(response_text: str) -> bool:
+    """Check if Claude chose not to respond."""
+    stripped = response_text.strip()
+    return stripped == NO_RESPONSE_SENTINEL or stripped.startswith(NO_RESPONSE_SENTINEL)
 
 
 def should_respond_to_thread_reply(text: str, user_name: str) -> bool:
@@ -526,17 +610,23 @@ def handle_message(client: SocketModeClient, req: SocketModeRequest, web_client:
                 )
                 print(f"  Response: {response_text[:100]}{'...' if len(response_text) > 100 else ''}")
 
-                response_ts = send_slack_response(web_client, channel, response_text, reply_thread_ts)
+                # Check if Claude chose not to respond
+                if is_no_response(response_text):
+                    print(f"  [Claude chose not to respond - skipping]")
+                    remove_reaction(web_client, channel, ts, EMOJI_WORKING)
+                    mark_work_completed(channel, ts)
+                else:
+                    response_ts = send_slack_response(web_client, channel, response_text, reply_thread_ts)
 
-                # Remove working emoji, add done emoji, mark completed
-                remove_reaction(web_client, channel, ts, EMOJI_WORKING)
-                add_reaction(web_client, channel, ts, EMOJI_DONE)
-                mark_work_completed(channel, ts)
+                    # Remove working emoji, add done emoji, mark completed
+                    remove_reaction(web_client, channel, ts, EMOJI_WORKING)
+                    add_reaction(web_client, channel, ts, EMOJI_DONE)
+                    mark_work_completed(channel, ts)
 
-                # Track this as an active thread if we started one
-                if response_ts and not reply_thread_ts:
-                    # We posted a new message - track it as potential thread parent
-                    ACTIVE_THREADS[response_ts] = {"channel": channel, "last_response_ts": response_ts}
+                    # Track this as an active thread if we started one
+                    if response_ts and not reply_thread_ts:
+                        # We posted a new message - track it as potential thread parent
+                        ACTIVE_THREADS[response_ts] = {"channel": channel, "last_response_ts": response_ts}
             else:
                 print(f"  Reply: python slack_bridge.py --reply {channel} {ts} \"your message\"")
 
@@ -609,17 +699,23 @@ def handle_message(client: SocketModeClient, req: SocketModeRequest, web_client:
                 )
                 print(f"  Response: {response_text[:100]}{'...' if len(response_text) > 100 else ''}")
 
-                response_ts = send_slack_response(web_client, channel, response_text, reply_to_thread)
+                # Check if Claude chose not to respond
+                if is_no_response(response_text):
+                    print(f"  [Claude chose not to respond - skipping]")
+                    remove_reaction(web_client, channel, ts, EMOJI_WORKING)
+                    mark_work_completed(channel, ts)
+                else:
+                    response_ts = send_slack_response(web_client, channel, response_text, reply_to_thread)
 
-                # Remove working emoji, add done emoji, mark completed
-                remove_reaction(web_client, channel, ts, EMOJI_WORKING)
-                add_reaction(web_client, channel, ts, EMOJI_DONE)
-                mark_work_completed(channel, ts)
+                    # Remove working emoji, add done emoji, mark completed
+                    remove_reaction(web_client, channel, ts, EMOJI_WORKING)
+                    add_reaction(web_client, channel, ts, EMOJI_DONE)
+                    mark_work_completed(channel, ts)
 
-                # Track this thread for future replies
-                if response_ts:
-                    thread_parent = thread_ts or ts
-                    ACTIVE_THREADS[thread_parent] = {"channel": channel, "last_response_ts": response_ts}
+                    # Track this thread for future replies
+                    if response_ts:
+                        thread_parent = thread_ts or ts
+                        ACTIVE_THREADS[thread_parent] = {"channel": channel, "last_response_ts": response_ts}
 
             print(f"{'='*60}\n")
 
@@ -630,8 +726,9 @@ def run_bridge(workspace: str = "default", auto_respond: bool = False, work_dir:
     AUTO_RESPOND = auto_respond
     WORK_DIR = work_dir or os.getcwd()
 
-    # Load any pending work from previous session
+    # Load any pending work and thread sessions from previous session
     load_pending_work()
+    load_thread_sessions()
 
     bot_token, app_token = get_tokens(workspace)
 
