@@ -1,0 +1,21 @@
+# Per-customer config (may contain network-sensitive details)
+customers/*.json
+!customers/.gitkeep
+
+# AWS-shaped secrets that should never reach git
+credentials.json
+config.json
+*.pem
+*.key
+.env
+.env.*
+
+# Local Python detritus
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# OS
+.DS_Store

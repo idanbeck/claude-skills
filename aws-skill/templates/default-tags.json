@@ -1,0 +1,12 @@
+{
+  "required_keys": ["Customer", "Project", "Owner", "Environment", "ManagedBy"],
+  "skill_value": "zerg-aws-skill",
+  "schema_notes": {
+    "Customer": "lowercase short name, e.g. dmatrix, cesium, andesite",
+    "Project": "scope within customer, e.g. jumphost, poc, dev, demo",
+    "Owner": "email of the human responsible",
+    "Environment": "one of dev, staging, prod",
+    "ManagedBy": "always 'zerg-aws-skill' for skill-managed resources"
+  },
+  "cost_allocation": "Customer and Project should be activated as cost-allocation tags in AWS Billing for `cost by-tag` to work."
+}

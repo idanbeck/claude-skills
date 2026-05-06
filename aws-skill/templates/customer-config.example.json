@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy to ../customers/<name>.json and edit. Gitignored.",
+  "name": "example-customer",
+  "region": "us-west-2",
+  "naming_prefix": "example",
+  "jumphost": {
+    "instance_type": "t4g.small",
+    "allowed_ingress": ["0.0.0.0/0"],
+    "ssh_key_path": "~/.ssh/aws-skill-example-jumphost"
+  },
+  "owner": "idan@zergai.com",
+  "default_environment": "dev"
+}
