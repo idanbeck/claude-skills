@@ -38,11 +38,24 @@ class AuthError(RuntimeError):
 
 
 def resolve_profile(profile: Optional[str]) -> str:
-    """Pick the profile to use. Precedence: explicit arg, AWS_PROFILE env,
-    DEFAULT_PROFILE."""
+    """Pick the profile to use. Precedence:
+        1. explicit arg
+        2. AWS_PROFILE env
+        3. DEFAULT_PROFILE if it exists locally
+        4. 'default' if it exists locally
+        5. DEFAULT_PROFILE (caller will get a useful error if missing)
+    """
     if profile:
         return profile
-    return os.environ.get("AWS_PROFILE") or DEFAULT_PROFILE
+    env = os.environ.get("AWS_PROFILE")
+    if env:
+        return env
+    local = set(list_local_profiles())
+    if DEFAULT_PROFILE in local:
+        return DEFAULT_PROFILE
+    if "default" in local:
+        return "default"
+    return DEFAULT_PROFILE
 
 
 def list_local_profiles() -> list[str]:
@@ -152,7 +165,11 @@ def whoami(session: boto3.Session) -> dict:
 
 
 def setup_wizard() -> int:
-    """Interactive setup. Calls `aws configure` for the chosen profile.
+    """Interactive setup. Offers three auth methods:
+
+        1. `aws login` — browser-based AWS Console session (easiest, AWS CLI v2.13+).
+        2. `aws configure sso` — IAM Identity Center / SSO flow.
+        3. `aws configure` — manual access key entry.
 
     Returns process exit code: 0 on success, non-zero on failure.
     """
@@ -193,20 +210,48 @@ def setup_wizard() -> int:
             return 0
 
     print()
-    print(f"Running `aws configure --profile {name}` ...")
-    print(
-        "You'll be prompted for AWS Access Key ID, Secret Access Key, "
-        "default region, and output format."
-    )
-    print(
-        "Tip: for SSO accounts, run `aws configure sso --profile "
-        f"{name}` instead and re-run setup with --skip-aws-configure."
-    )
+    print("Pick an auth method:")
+    print("  [1] aws login         (browser flow, easiest; AWS CLI v2.13+)")
+    print("  [2] aws configure sso (IAM Identity Center / SSO)")
+    print("  [3] aws configure     (manual access key entry)")
+    print()
+    choice = input("Choice [1]: ").strip() or "1"
     print()
 
-    rc = subprocess.call(["aws", "configure", "--profile", name])
+    if choice == "1":
+        cmd = ["aws", "login", "--profile", name]
+        method = "aws login"
+    elif choice == "2":
+        cmd = ["aws", "configure", "sso", "--profile", name]
+        method = "aws configure sso"
+    elif choice == "3":
+        cmd = ["aws", "configure", "--profile", name]
+        method = "aws configure"
+    else:
+        print(f"Unknown choice '{choice}'. Aborting.")
+        return 1
+
+    print(f"Running `{' '.join(cmd)}` ...")
+    print()
+
+    try:
+        rc = subprocess.call(cmd)
+    except FileNotFoundError:
+        print(
+            "AWS CLI not found in PATH. Install it: "
+            "`brew install awscli` or "
+            "see https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+        )
+        return 127
+
     if rc != 0:
-        print(f"`aws configure` exited with code {rc}.")
+        print(f"`{method}` exited with code {rc}.")
+        if method == "aws login":
+            print(
+                "Hint: `aws login` requires AWS CLI v2.13+. "
+                "Try option [2] (SSO) or [3] (access keys), or upgrade with "
+                "`brew upgrade awscli`."
+            )
         return rc
 
     print()
@@ -222,10 +267,23 @@ def setup_wizard() -> int:
         return 2
 
     print()
-    print(f"  Account:  {identity['account']}")
-    print(f"  ARN:      {identity['arn']}")
-    print(f"  Region:   {identity['region']}")
-    print(f"  Profile:  {identity['profile']}")
+    print(f"  Account:        {identity['account']}")
+    if "account_alias" in identity:
+        print(f"  Account alias:  {identity['account_alias']}")
+    print(f"  ARN:            {identity['arn']}")
+    print(f"  Region:         {identity['region']}")
+    print(f"  Profile:        {identity['profile']}")
     print()
     print(f"Profile '{name}' is configured and reachable. Setup complete.")
+
+    # Friendly nudge if the caller landed on root credentials
+    if ":root" in identity.get("arn", ""):
+        print()
+        print(
+            "Note: you authenticated as the AWS account root. Root creds work "
+            "but are over-privileged for routine ops. Consider creating an IAM "
+            "user (or IAM Identity Center user) and re-running this wizard "
+            "with those credentials when you have a moment."
+        )
+
     return 0
