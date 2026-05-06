@@ -130,6 +130,9 @@ def _build_ec2(sub) -> None:
     for op in ("start", "stop", "terminate"):
         p_op = ec2.add_parser(op, help=f"{op} an instance.")
         p_op.add_argument("instance_id")
+    p_resize = ec2.add_parser("resize", help="Change instance type (stop, modify, restart).")
+    p_resize.add_argument("instance_id")
+    p_resize.add_argument("--instance-type", required=True, dest="instance_type")
     p_alloc = ec2.add_parser("alloc-eip", help="Allocate an Elastic IP.")
     p_alloc.add_argument("--customer", default=None)
     p_alloc.add_argument("--project", default=None)
@@ -513,6 +516,13 @@ def _dispatch_ec2(session, args):
         if is_dry_run(args):
             return {"would_terminate": args.instance_id}
         return ec2_svc.terminate_instance(session, args.instance_id)
+    if op == "resize":
+        require_confirm(args, "ec2 resize (stops + restarts the instance)")
+        if is_dry_run(args):
+            return {"would_resize": args.instance_id, "to": args.instance_type}
+        return ec2_svc.resize_instance(
+            session, args.instance_id, instance_type=args.instance_type
+        )
     if op == "alloc-eip":
         require_confirm(args, "ec2 alloc-eip")
         if is_dry_run(args):

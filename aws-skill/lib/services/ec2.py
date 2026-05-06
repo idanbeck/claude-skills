@@ -103,6 +103,61 @@ def terminate_instance(session: boto3.Session, instance_id: str) -> dict[str, An
     return {"changes": resp.get("TerminatingInstances", [])}
 
 
+def resize_instance(
+    session: boto3.Session,
+    instance_id: str,
+    *,
+    instance_type: str,
+) -> dict[str, Any]:
+    """Change an instance's type. Requires the instance to be stopped.
+
+    Stops it if needed, modifies the type, restarts. EIP / SG / key pair /
+    EBS / private IP all survive. Public EIP-associated IP is unchanged.
+    """
+    ec2 = session.client("ec2")
+
+    # 1) Find current state + type.
+    desc = ec2.describe_instances(InstanceIds=[instance_id])
+    inst = desc["Reservations"][0]["Instances"][0]
+    state = inst["State"]["Name"]
+    old_type = inst["InstanceType"]
+
+    actions: list[dict[str, Any]] = [
+        {"current_type": old_type, "current_state": state, "target_type": instance_type}
+    ]
+
+    if old_type == instance_type:
+        actions.append({"noop": "instance is already this type"})
+        return {"instance_id": instance_id, "actions": actions}
+
+    # 2) Stop if running.
+    was_running = state in {"running", "pending"}
+    if was_running:
+        ec2.stop_instances(InstanceIds=[instance_id])
+        ec2.get_waiter("instance_stopped").wait(InstanceIds=[instance_id])
+        actions.append({"stopped": instance_id})
+
+    # 3) Modify instance type.
+    ec2.modify_instance_attribute(
+        InstanceId=instance_id,
+        InstanceType={"Value": instance_type},
+    )
+    actions.append({"resized_to": instance_type})
+
+    # 4) Restart if it had been running.
+    if was_running:
+        ec2.start_instances(InstanceIds=[instance_id])
+        ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
+        actions.append({"started": instance_id})
+
+    return {
+        "instance_id": instance_id,
+        "old_type": old_type,
+        "new_type": instance_type,
+        "actions": actions,
+    }
+
+
 def allocate_eip(
     session: boto3.Session, *, tags: Optional[dict[str, str]] = None
 ) -> dict[str, Any]:
