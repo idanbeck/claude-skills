@@ -2,6 +2,10 @@
 customers/*.json
 !customers/.gitkeep
 
+# Generated Terraform configurations (per-customer; may contain CIDRs)
+terraform/
+
+
 # AWS-shaped secrets that should never reach git
 credentials.json
 config.json
