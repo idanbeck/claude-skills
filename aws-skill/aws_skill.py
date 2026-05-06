@@ -47,6 +47,7 @@ from lib.services import s3 as s3_svc  # noqa: E402
 from lib.services import vpc as vpc_svc  # noqa: E402
 
 from lib.intent import audit as audit_intent  # noqa: E402
+from lib.intent import bootstrap as bootstrap_intent  # noqa: E402
 from lib.intent import cleanup as cleanup_intent  # noqa: E402
 from lib.intent import cost_report as cost_report_intent  # noqa: E402
 from lib.intent import inventory as inventory_intent  # noqa: E402
@@ -96,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_cleanup(sub)
     _build_audit(sub)
     _build_terraform(sub)
+    _build_bootstrap(sub)
 
     return p
 
@@ -303,7 +305,9 @@ def _build_jumphost(sub) -> None:
     )
     p_prov = jh.add_parser("provision", help="Provision a jump host.")
     p_prov.add_argument("--customer", required=True)
-    p_prov.add_argument("--allowed-ip", default=None, dest="allowed_ip")
+    p_prov.add_argument("--allowed-ip", action="append", default=None,
+                        dest="allowed_ips",
+                        help="CIDR to allow on port 22. Repeatable.")
     p_prov.add_argument("--instance-type", default=None, dest="instance_type")
     p_prov.add_argument("--environment", default="dev")
     p_td = jh.add_parser("teardown", help="Tear down a jump host.")
@@ -311,7 +315,9 @@ def _build_jumphost(sub) -> None:
     p_tf = jh.add_parser("terraform",
                          help="Render the jumphost as Terraform instead of executing.")
     p_tf.add_argument("--customer", required=True)
-    p_tf.add_argument("--allowed-ip", default=None, dest="allowed_ip")
+    p_tf.add_argument("--allowed-ip", action="append", default=None,
+                      dest="allowed_ips",
+                      help="CIDR to allow on port 22. Repeatable.")
     p_tf.add_argument("--instance-type", default=None, dest="instance_type")
     p_tf.add_argument("--environment", default="dev")
     p_tf.add_argument("--out-dir", default=None, dest="out_dir",
@@ -351,10 +357,29 @@ def _build_terraform(sub) -> None:
     )
     p_jh = tf.add_parser("jumphost", help="Render a jumphost as .tf files.")
     p_jh.add_argument("--customer", required=True)
-    p_jh.add_argument("--allowed-ip", default=None, dest="allowed_ip")
+    p_jh.add_argument("--allowed-ip", action="append", default=None,
+                      dest="allowed_ips",
+                      help="CIDR to allow on port 22. Repeatable.")
     p_jh.add_argument("--instance-type", default=None, dest="instance_type")
     p_jh.add_argument("--environment", default="dev")
     p_jh.add_argument("--out-dir", default=None, dest="out_dir")
+
+
+def _build_bootstrap(sub) -> None:
+    bs = sub.add_parser(
+        "bootstrap",
+        help="One-time setup intents (e.g. create IAM admin off root)."
+    ).add_subparsers(dest="bootstrap_op", required=True)
+    p_iam = bs.add_parser(
+        "iam-admin",
+        help="Create an IAM user with AdministratorAccess + access keys."
+    )
+    p_iam.add_argument("--username", required=True)
+    p_iam.add_argument("--update-profile", default=None, dest="update_profile",
+                       help="Write the new keys into ~/.aws/credentials as this profile.")
+    p_iam.add_argument("--with-console-password", action="store_true",
+                       dest="with_console_password",
+                       help="Also create a console login password.")
 
 
 # ---- Dispatcher ------------------------------------------------------------
@@ -442,6 +467,8 @@ def _dispatch(session, args) -> Any:
         return audit_intent.run(session, key_age_days=args.key_age_days)
     if cmd == "terraform":
         return _dispatch_terraform(args)
+    if cmd == "bootstrap":
+        return _dispatch_bootstrap(session, args)
 
     raise NotImplementedError(f"Unhandled command: {cmd}")
 
@@ -671,7 +698,7 @@ def _dispatch_jumphost(session, args):
         if not is_dry_run(args):
             require_confirm(args, "jumphost provision")
         return jumphost_intent.provision(
-            session, customer=args.customer, allowed_ip=args.allowed_ip,
+            session, customer=args.customer, allowed_ips=args.allowed_ips,
             instance_type=args.instance_type, environment=args.environment,
             dry_run=is_dry_run(args),
         )
@@ -683,7 +710,7 @@ def _dispatch_jumphost(session, args):
         )
     if op == "terraform":
         return terraform_intent.render_jumphost(
-            customer=args.customer, allowed_ip=args.allowed_ip,
+            customer=args.customer, allowed_ips=args.allowed_ips,
             instance_type=args.instance_type, environment=args.environment,
             out_dir=Path(args.out_dir) if args.out_dir else None,
         )
@@ -720,9 +747,28 @@ def _dispatch_terraform(args):
     op = args.tf_op
     if op == "jumphost":
         return terraform_intent.render_jumphost(
-            customer=args.customer, allowed_ip=args.allowed_ip,
+            customer=args.customer, allowed_ips=args.allowed_ips,
             instance_type=args.instance_type, environment=args.environment,
             out_dir=Path(args.out_dir) if args.out_dir else None,
+        )
+
+
+def _dispatch_bootstrap(session, args):
+    op = args.bootstrap_op
+    if op == "iam-admin":
+        require_confirm(args, "bootstrap iam-admin")
+        if is_dry_run(args):
+            return {
+                "would_create_user": args.username,
+                "policy": "arn:aws:iam::aws:policy/AdministratorAccess",
+                "would_update_profile": args.update_profile,
+            }
+        return bootstrap_intent.create_admin_user(
+            session,
+            username=args.username,
+            update_profile=args.update_profile,
+            region=args.region,
+            create_console_password=args.with_console_password,
         )
 
 

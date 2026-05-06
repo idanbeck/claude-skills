@@ -40,13 +40,17 @@ def provision(
     session: boto3.Session,
     *,
     customer: str,
-    allowed_ip: Optional[str] = None,
+    allowed_ips: Optional[list[str]] = None,
     instance_type: Optional[str] = None,
     environment: str = "dev",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Provision a complete jump host. Idempotent in the sense that it tags
     everything; re-running creates a NEW set unless you teardown first.
+
+    `allowed_ips` is a list of CIDRs that may SSH to the jumphost. If not
+    given, falls back to customers/<name>.json `jumphost.allowed_ingress`
+    (also a list).
 
     Returns a dict with the created resource IDs and an SSH connection hint.
     """
@@ -57,12 +61,21 @@ def provision(
     instance_type = (
         instance_type or jh_cfg.get("instance_type") or "t4g.small"
     )
-    allowed = allowed_ip or (jh_cfg.get("allowed_ingress") or [None])[0]
-    if not allowed:
+    allowed_list = allowed_ips or jh_cfg.get("allowed_ingress") or []
+    if not allowed_list:
         raise ValueError(
-            "No allowed-ingress CIDR. Pass --allowed-ip or set "
+            "No allowed-ingress CIDRs. Pass --allowed-ip (repeatable) or set "
             f"customers/{customer}.json jumphost.allowed_ingress."
         )
+
+    warnings: list[str] = []
+    if "0.0.0.0/0" in allowed_list:
+        warnings.append(
+            "Ingress includes 0.0.0.0/0 — SSH is open to the entire internet. "
+            "Acceptable here because the jumphost is key-based + fail2ban + ufw, "
+            "but consider restricting to specific egress IPs if you can."
+        )
+
     ssh_key_path = Path(
         jh_cfg.get("ssh_key_path", f"~/.ssh/aws-skill-{customer}-jumphost")
     ).expanduser()
@@ -77,13 +90,14 @@ def provision(
         "customer": customer,
         "region": region or session.region_name,
         "instance_type": instance_type,
-        "allowed_ip": allowed,
+        "allowed_ips": allowed_list,
         "tags": tags,
         "ssh_key_path": str(ssh_key_path),
         "naming_prefix": naming_prefix,
+        "warnings": warnings,
         "actions": [
             "create EC2 key pair",
-            "create security group + ingress rule (port 22 from allowed IP)",
+            f"create security group + {len(allowed_list)} ingress rule(s) (port 22)",
             "look up latest Ubuntu 22.04 LTS AMI",
             "render cloud-init from templates/jumphost-userdata.sh",
             "run EC2 instance",
@@ -115,7 +129,7 @@ def provision(
     )
     created["key_pair"] = kp
 
-    # 2) security group + ingress
+    # 2) security group + ingress (one rule per allowed CIDR)
     sg_name = _resource_name(naming_prefix, "sg")
     sg = ec2.create_security_group(
         session,
@@ -124,10 +138,13 @@ def provision(
         tags=tags,
     )
     created["security_group"] = sg
-    ec2.authorize_ingress(
-        session, group_id=sg["group_id"], cidr=allowed, port=22, protocol="tcp"
-    )
-    created["ingress"] = {"cidr": allowed, "port": 22}
+    ingress_added: list[dict[str, Any]] = []
+    for cidr in allowed_list:
+        ec2.authorize_ingress(
+            session, group_id=sg["group_id"], cidr=cidr, port=22, protocol="tcp"
+        )
+        ingress_added.append({"cidr": cidr, "port": 22})
+    created["ingress"] = ingress_added
 
     # 3) AMI
     image_id = ec2.latest_ubuntu_lts_ami(session)
@@ -136,7 +153,7 @@ def provision(
     # 4) user-data
     user_data = _render_user_data(
         hostname=_resource_name(naming_prefix, "host"),
-        allowed_ip=allowed,
+        allowed_ip=", ".join(allowed_list),
     )
 
     # 5) run instance
