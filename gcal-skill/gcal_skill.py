@@ -278,6 +278,26 @@ def get_credentials(account: Optional[str] = None) -> tuple[Credentials, str]:
     return creds, account
 
 
+def resolve_calendar_id(service, calendar: Optional[str]) -> str:
+    """Resolve a calendar name or id to the canonical id.
+
+    If `calendar` is None or 'primary', returns 'primary'. Otherwise:
+    1) try to match the calendarList by id (exact)
+    2) fallback to match by summary (name) — case-insensitive
+    3) if nothing matches, return the string as-is (caller may have passed a raw id)
+    """
+    if not calendar or calendar == "primary":
+        return "primary"
+    cals = service.calendarList().list().execute().get("items", [])
+    for c in cals:
+        if c.get("id") == calendar:
+            return c["id"]
+    for c in cals:
+        if (c.get("summary") or "").lower() == calendar.lower():
+            return c["id"]
+    return calendar
+
+
 def get_calendar_service(account: Optional[str] = None):
     """Get Calendar API service."""
     creds, email = get_credentials(account)
@@ -510,9 +530,13 @@ def cmd_create(args):
         event_body["description"] = args.description
     if args.attendees:
         event_body["attendees"] = [{"email": e.strip()} for e in args.attendees.split(",")]
+    if getattr(args, "color", None):
+        event_body["colorId"] = str(args.color)
+
+    cal_id = resolve_calendar_id(service, getattr(args, "calendar", None))
 
     event = service.events().insert(
-        calendarId="primary",
+        calendarId=cal_id,
         body=event_body,
         sendUpdates="all" if args.attendees else "none",
     ).execute()
@@ -520,6 +544,7 @@ def cmd_create(args):
     output({
         "success": True,
         "account": account,
+        "calendar": cal_id,
         "event": format_event(event),
         "html_link": event.get("htmlLink"),
     })
@@ -528,10 +553,11 @@ def cmd_create(args):
 def cmd_delete(args):
     """Delete an event."""
     service, account = get_calendar_service(args.account)
+    cal_id = resolve_calendar_id(service, getattr(args, "calendar", None))
 
     try:
         service.events().delete(
-            calendarId="primary",
+            calendarId=cal_id,
             eventId=args.event_id,
             sendUpdates="all",
         ).execute()
@@ -548,11 +574,12 @@ def cmd_delete(args):
 def cmd_update(args):
     """Update an existing event."""
     service, account = get_calendar_service(args.account)
+    cal_id = resolve_calendar_id(service, getattr(args, "calendar", None))
 
     try:
         # Get existing event
         event = service.events().get(
-            calendarId="primary",
+            calendarId=cal_id,
             eventId=args.event_id,
         ).execute()
 
@@ -569,10 +596,12 @@ def cmd_update(args):
         if args.end:
             end_dt = parse_datetime(args.end)
             event["end"] = {"dateTime": end_dt.isoformat(), "timeZone": str(LOCAL_TZ)}
+        if getattr(args, "color", None):
+            event["colorId"] = str(args.color)
 
         # Save updates
         updated_event = service.events().update(
-            calendarId="primary",
+            calendarId=cal_id,
             eventId=args.event_id,
             body=event,
         ).execute()
@@ -637,6 +666,87 @@ def cmd_search(args):
     })
 
 
+def cmd_bulk_create(args):
+    """Bulk-create events from a JSON spec.
+
+    JSON spec format (a list of event objects):
+    [
+        {
+            "title": "Deep Block A",
+            "start": "2026-05-22 08:30",
+            "end":   "2026-05-22 12:30",
+            "color": 9,
+            "description": "NeurIPS writing"
+        },
+        ...
+    ]
+
+    All events go on the same calendar (--calendar). If --dry-run, print what
+    would be created without hitting the API.
+    """
+    import json as _json
+    service, account = get_calendar_service(args.account)
+    cal_id = resolve_calendar_id(service, getattr(args, "calendar", None))
+
+    with open(args.spec, "r") as f:
+        spec = _json.load(f)
+    if not isinstance(spec, list):
+        output({"error": "spec must be a JSON list of event objects"})
+        sys.exit(1)
+
+    if args.dry_run:
+        output({
+            "dry_run": True,
+            "account": account,
+            "calendar": cal_id,
+            "count": len(spec),
+            "events": spec,
+        })
+        return
+
+    created = []
+    errors = []
+    for i, e in enumerate(spec):
+        try:
+            start_dt = parse_datetime(e["start"])
+            end_dt = parse_datetime(e["end"], start_dt) if e.get("end") else start_dt + timedelta(hours=1)
+            body = {
+                "summary": e["title"],
+                "start": {"dateTime": start_dt.isoformat(), "timeZone": str(LOCAL_TZ)},
+                "end": {"dateTime": end_dt.isoformat(), "timeZone": str(LOCAL_TZ)},
+            }
+            if e.get("description"):
+                body["description"] = e["description"]
+            if e.get("location"):
+                body["location"] = e["location"]
+            if e.get("color"):
+                body["colorId"] = str(e["color"])
+            attendees = e.get("attendees") or []
+            if attendees:
+                body["attendees"] = [
+                    {"email": a} if isinstance(a, str) else a
+                    for a in attendees
+                ]
+            ev = service.events().insert(
+                calendarId=cal_id,
+                body=body,
+                sendUpdates="all" if attendees else "none",
+            ).execute()
+            created.append({"index": i, "title": e["title"], "event_id": ev.get("id"), "html_link": ev.get("htmlLink")})
+        except Exception as ex:
+            errors.append({"index": i, "title": e.get("title"), "error": str(ex)})
+
+    output({
+        "success": len(errors) == 0,
+        "account": account,
+        "calendar": cal_id,
+        "created": created,
+        "errors": errors,
+        "created_count": len(created),
+        "error_count": len(errors),
+    })
+
+
 def cmd_accounts(args):
     """List authenticated accounts."""
     TOKENS_DIR.mkdir(exist_ok=True)
@@ -693,11 +803,14 @@ def main():
     p.add_argument("--location", "-l", help="Location")
     p.add_argument("--description", "-d", help="Description")
     p.add_argument("--attendees", help="Comma-separated attendee emails")
+    p.add_argument("--calendar", "-c", help="Calendar name or id (default: primary)")
+    p.add_argument("--color", help="Color id 1-11 (Google's palette)")
     p.add_argument("--account", "-a", help="Account email")
 
     # delete
     p = subparsers.add_parser("delete", help="Delete event")
     p.add_argument("event_id", help="Event ID")
+    p.add_argument("--calendar", "-c", help="Calendar name or id (default: primary)")
     p.add_argument("--account", "-a", help="Account email")
 
     # update
@@ -708,6 +821,15 @@ def main():
     p.add_argument("--location", "-l", help="New location")
     p.add_argument("--start", "-s", help="New start time")
     p.add_argument("--end", "-e", help="New end time")
+    p.add_argument("--color", help="Color id 1-11 (Google's palette)")
+    p.add_argument("--calendar", "-c", help="Calendar name or id (default: primary)")
+    p.add_argument("--account", "-a", help="Account email")
+
+    # bulk-create
+    p = subparsers.add_parser("bulk-create", help="Bulk-create events from a JSON spec file")
+    p.add_argument("spec", help="Path to JSON file (list of event objects)")
+    p.add_argument("--calendar", "-c", help="Calendar name or id (default: primary)")
+    p.add_argument("--dry-run", action="store_true", help="Print what would be created without doing it")
     p.add_argument("--account", "-a", help="Account email")
 
     # calendars
@@ -741,6 +863,7 @@ def main():
         "create": cmd_create,
         "delete": cmd_delete,
         "update": cmd_update,
+        "bulk-create": cmd_bulk_create,
         "calendars": cmd_calendars,
         "search": cmd_search,
         "accounts": cmd_accounts,

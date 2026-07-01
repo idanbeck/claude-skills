@@ -80,6 +80,8 @@ python3 ~/.claude/skills/gcal-skill/gcal_skill.py create \
 - `--location` / `-l` - Event location
 - `--description` / `-d` - Event description
 - `--attendees` - Comma-separated attendee emails
+- `--calendar` / `-c` - Target calendar name or id (default `primary`). Accepts the display name; skill resolves it.
+- `--color` - Google color id (1-11). See palette below.
 - `--account` / `-a` - Calendar account
 
 **Time formats supported:**
@@ -88,10 +90,60 @@ python3 ~/.claude/skills/gcal-skill/gcal_skill.py create \
 - `14:00` (today at that time)
 - `2:00 PM` (today at that time)
 
+**Google color id palette:**
+
+| id | name | suggested category |
+|---|---|---|
+| 1 | Lavender | meetings |
+| 2 | Sage | personal / family |
+| 3 | Grape | reading / research |
+| 4 | Flamingo | hard stops / hockey |
+| 5 | Banana | admin / inbox |
+| 6 | Tangerine | customer / external |
+| 7 | Peacock | deep work |
+| 8 | Graphite | placeholders / OOO |
+| 9 | Blueberry | engineering |
+| 10 | Basil | writing |
+| 11 | Tomato | urgent |
+
+### Bulk Create Events from a JSON spec
+
+For mapping a full day onto the calendar in one shot — drives the daily-note → calendar workflow.
+
+```bash
+python3 ~/.claude/skills/gcal-skill/gcal_skill.py bulk-create path/to/day.json \
+  --calendar "Idan Work Blocks" \
+  [--dry-run] \
+  [--account EMAIL]
+```
+
+**Spec format (list of event objects):**
+
+```json
+[
+  {
+    "title": "Deep Block A - CAO writing",
+    "start": "2026-05-22 08:30",
+    "end":   "2026-05-22 12:30",
+    "color": 10,
+    "description": "NeurIPS abstract + intro"
+  },
+  {
+    "title": "Lunch + walk",
+    "start": "2026-05-22 12:30",
+    "end":   "2026-05-22 13:30",
+    "color": 2
+  }
+]
+```
+
+Per-event keys: `title` (required), `start` (required), `end`, `location`, `description`, `color`, `attendees` (list).
+`--dry-run` prints the plan without hitting the API. All events land on the calendar named by `--calendar`.
+
 ### Delete Event
 
 ```bash
-python3 ~/.claude/skills/gcal-skill/gcal_skill.py delete EVENT_ID [--account EMAIL]
+python3 ~/.claude/skills/gcal-skill/gcal_skill.py delete EVENT_ID [--calendar NAME] [--account EMAIL]
 ```
 
 ### Search Events

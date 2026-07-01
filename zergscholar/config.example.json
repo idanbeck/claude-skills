@@ -1,0 +1,11 @@
+{
+  "default_account": "personal",
+  "vault_path": "/Users/idanbeck/Library/Mobile Documents/iCloud~md~obsidian/Documents/idanbeck",
+  "accounts": {
+    "personal": {
+      "base_url": "https://zergscholar.fly.dev",
+      "token": "zsk_REPLACE_ME",
+      "default_organization_id": "00000000-0000-0000-0000-000000000000"
+    }
+  }
+}

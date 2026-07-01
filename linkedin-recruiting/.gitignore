@@ -1,0 +1,12 @@
+# NEVER commit: burner session cookies, applicant PII, resumes.
+burner_state.json
+recruiting.db
+recruiting.db-shm
+recruiting.db-wal
+resumes/
+evidence/
+__pycache__/
+*.pyc
+# per-role profiles may contain pasted JD text; commit only the seed
+role_profiles/*.json
+!role_profiles/_default.json

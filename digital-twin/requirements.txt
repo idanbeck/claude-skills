@@ -1,0 +1,5 @@
+elevenlabs>=2.0.0
+requests>=2.28.0
+fal-client>=0.4.0
+# Optional: resemblyzer + librosa + scikit-learn for multi-speaker voice isolation
+# Optional: ffmpeg (system) for duration checks and webcam capture; tesseract for captcha OCR

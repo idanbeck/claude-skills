@@ -1,0 +1,19 @@
+# Digital Twin — commit CODE ONLY (digital_twin.py, SKILL.md, requirements.txt).
+# Never commit personal media, cloned-voice samples, captchas, or local state.
+config.json
+source/
+output/
+assets/
+samples/
+captures/
+*.mp4
+*.mkv
+*.wav
+*.mp3
+*.m4a
+*.png
+*.jpg
+*.jpeg
+meet_segments.json
+__pycache__/
+*.pyc

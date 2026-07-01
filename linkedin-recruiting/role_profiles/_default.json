@@ -1,0 +1,35 @@
+{
+  "role_title": "Generative Software Engineer",
+  "company": "Zerg AI (Epoch)",
+  "jd_text": "",
+  "summary": "Zerg builds autonomous software-engineering systems — agents that write, test, and fix code in production. We want builders who turn frontier AI research into shipping products: strong engineers with research instincts, comfortable across ML and systems, who think about user/business intent and not just metrics.",
+  "must_haves": [
+    "Strong software engineering: ships real, working software (not just notebooks/prototypes)",
+    "ML/AI depth: LLMs, agents, RL, or distributed ML — can read papers and implement them",
+    "Evidence of building: GitHub, shipped products, papers, or demos"
+  ],
+  "nice_to_haves": [
+    "First-author research / publications",
+    "Agentic systems, RL/RLHF, world models, or inference-time compute",
+    "Distributed/parallel ML, performance/kernels, or systems work",
+    "Has founded or been early at a startup; high agency / 0-to-1"
+  ],
+  "stack_keywords": ["python", "pytorch", "jax", "rl", "rlhf", "agents", "llm",
+    "distributed", "world models", "fastapi", "docker", "cuda", "triton", "dspy"],
+  "negative_signals": [
+    "Marty pattern: optimizes without context — technically correct but misses user/business intent (see Personas/Marty)",
+    "Pure prompt-engineering / no-code AI with no real engineering depth",
+    "Title inflation or claims with no evidence in work history",
+    "Job-hopping with no shipped outcomes"
+  ],
+  "seniority": "open (intern through senior); calibrate score to evidence, not years",
+  "scoring_weights": {
+    "technical_skills": 0.30,
+    "problem_solving": 0.25,
+    "communication": 0.10,
+    "cultural_fit": 0.15,
+    "growth_potential": 0.20
+  },
+  "tier_thresholds": {"reach_out": 3.8, "maybe": 3.0},
+  "calibration_anchor": "Franklin Yiu scored 4.4/5 overall and was a clear hire: first-author EXAG 2025 paper, modern stack (PyTorch/JAX/DSPy), strong research-to-code translation. Treat ~4.4 as 'strong reach-out'."
+}

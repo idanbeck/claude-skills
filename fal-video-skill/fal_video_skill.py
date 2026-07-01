@@ -53,6 +53,11 @@ MODELS = {
     "wan": "fal-ai/wan/v2.2-a14b/image-to-video",
     "wan-flf": "fal-ai/wan-flf2v",
 
+    # ByteDance Seedance (cinematic i2v; camera_fixed locks the shot)
+    "seedance": "fal-ai/bytedance/seedance/v1/pro/image-to-video",
+    "seedance-lite": "fal-ai/bytedance/seedance/v1/lite/image-to-video",
+    "seedance-t2v": "fal-ai/bytedance/seedance/v1/pro/text-to-video",
+
     # Vidu (start-end frame interpolation)
     "vidu": "fal-ai/vidu/start-end-to-video",
 
@@ -131,6 +136,16 @@ def upload_image_to_fal(image_path, api_key):
     path = Path(image_path)
     if not path.exists():
         return None
+
+    # Prefer fal_client.upload_file -> real fal CDN URL (robust across models).
+    try:
+        import fal_client
+        os.environ["FAL_KEY"] = api_key
+        url = fal_client.upload_file(str(path))
+        if url and url.startswith("http"):
+            return url
+    except Exception:
+        pass
 
     # Read file
     with open(path, "rb") as f:
@@ -344,6 +359,13 @@ def cmd_i2v(args):
             payload["prompt"] = args.prompt
     elif "minimax" in model:
         payload["prompt"] = args.prompt or "animate this image with natural motion"
+    elif "seedance" in model:
+        payload["duration"] = str(args.duration) if args.duration else "5"
+        payload["resolution"] = getattr(args, "resolution", None) or "1080p"
+        if args.aspect_ratio:
+            payload["aspect_ratio"] = args.aspect_ratio
+        if getattr(args, "camera_fixed", False):
+            payload["camera_fixed"] = True
 
     if args.negative_prompt:
         payload["negative_prompt"] = args.negative_prompt
@@ -585,6 +607,8 @@ def main():
     i2v_parser.add_argument("--output", "-o", help="Output file path")
     i2v_parser.add_argument("--timeout", "-t", type=int, default=300, help="Timeout in seconds")
     i2v_parser.add_argument("--tail-image", help="End frame image path or URL (Kling models only)")
+    i2v_parser.add_argument("--resolution", help="Resolution for seedance: 480p/720p/1080p")
+    i2v_parser.add_argument("--camera-fixed", action="store_true", help="Lock the camera (seedance)")
 
     # Text to video
     t2v_parser = subparsers.add_parser("t2v", help="Text to video generation")

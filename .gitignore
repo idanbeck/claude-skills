@@ -112,3 +112,14 @@ scansnap-bridge/com.idanbeck.scansnap-bridge.plist
 
 # Zergboard skill (sensitive)
 zergboard-skill/config.json
+
+# === Blanket secret protection for ALL skills (added 2026-07-01) ===
+# Belt-and-suspenders over the explicit per-skill list above — also covers new skills.
+**/config.json
+**/cache.json
+**/credentials.json
+**/accounts.json
+**/tokens/
+**/sessions/
+**/*.key
+**/private.key
