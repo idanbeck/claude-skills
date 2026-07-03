@@ -1,0 +1,9 @@
+{
+  "default_account": "personal",
+  "accounts": {
+    "personal": {
+      "publication_url": "https://REPLACE_ME.substack.com",
+      "cookie": "substack.sid=REPLACE_ME"
+    }
+  }
+}
