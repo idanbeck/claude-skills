@@ -1,1 +1,2 @@
-blinkpy>=0.22.0
+blinkpy>=0.25.3
+aiohttp
