@@ -63,7 +63,7 @@ def emit(payload: Any) -> None:
     print(json.dumps(payload, indent=2, default=str))
 
 
-def request(method: str, path: str, *, query: Optional[Dict[str, Any]] = None, body: Optional[Dict[str, Any]] = None) -> Any:
+def request(method: str, path: str, *, query: Optional[Dict[str, Any]] = None, body: Optional[Dict[str, Any]] = None, extra_headers: Optional[Dict[str, str]] = None) -> Any:
     cfg = load_config()
     token = cfg.get("api_token")
     base = (cfg.get("base_url") or DEFAULT_BASE_URL).rstrip("/")
@@ -81,6 +81,8 @@ def request(method: str, path: str, *, query: Optional[Dict[str, Any]] = None, b
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
     }
+    if extra_headers:
+        headers.update(extra_headers)
     data: Optional[bytes] = None
     if body is not None:
         headers["Content-Type"] = "application/json"
@@ -197,6 +199,11 @@ def resolve_card(identifier: str) -> Dict[str, Any]:
         return _full_card(cards[0]["id"])
     emit({"error": f"Card identifier not recognized: {identifier} (expected UUID or e.g. CES-1)"})
     sys.exit(1)
+
+
+def _if_match(card: Dict[str, Any]) -> Dict[str, str]:
+    rev = card.get("revision")
+    return {"If-Match": str(rev)} if rev is not None else {}
 
 
 def _full_card(card_id: str) -> Dict[str, Any]:
@@ -391,7 +398,7 @@ def cmd_update(args: argparse.Namespace) -> None:
     if not body:
         emit({"error": "Nothing to update — pass at least one of --title/--description/--priority/--due/--estimate"})
         sys.exit(1)
-    data = request("PATCH", f"/api/cards/{card['id']}", body=body)
+    data = request("PATCH", f"/api/cards/{card['id']}", body=body, extra_headers=_if_match(card))
     emit({"card": data.get("card", data)})
 
 
@@ -403,7 +410,7 @@ def cmd_move(args: argparse.Namespace) -> None:
         emit({"error": f"Column not found: {args.column}", "available": [c["name"] for c in full.get("columns", [])]})
         sys.exit(1)
     body = {"targetColumnId": target_col, "targetPosition": args.position if args.position is not None else 0}
-    data = request("POST", f"/api/cards/{card['id']}/move", body=body)
+    data = request("POST", f"/api/cards/{card['id']}/move", body=body, extra_headers=_if_match(card))
     emit({"card": data})
 
 
@@ -425,7 +432,7 @@ def cmd_reorder(args: argparse.Namespace) -> None:
         request("POST", f"/api/cards/{card['id']}/move", body={
             "targetColumnId": target_column,
             "targetPosition": index
-        })
+        }, extra_headers=_if_match(_full_card(card['id'])))
     emit({"reordered": [{"id": c["id"], "external_id": c.get("external_id"), "position": i} for i, c in enumerate(cards)]})
 
 
