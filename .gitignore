@@ -123,3 +123,6 @@ zergboard-skill/config.json
 **/sessions/
 **/*.key
 **/private.key
+
+# Built CLI binaries (platform-specific, rebuild from source)
+zergboard-skill/bin/
