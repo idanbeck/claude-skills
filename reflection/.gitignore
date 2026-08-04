@@ -1,0 +1,5 @@
+# Portraits are sensitive personal output — never commit them.
+out/
+*-portrait.md
+*portrait*.md
+reflection-corpus.md
