@@ -126,3 +126,5 @@ zergboard-skill/config.json
 
 # Built CLI binaries (platform-specific, rebuild from source)
 zergboard-skill/bin/
+slack-skill/slack_bridge.log
+*.log

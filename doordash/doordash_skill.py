@@ -153,13 +153,17 @@ def check(order: dict) -> int:
         noodle_words = ("noodle", "rice", "chow mein", "chow fun", "lo mein", "udon",
                         "pasta", "vermicelli", "pho", "congee")
         if not any(any(w in n for w in noodle_words) for n in names_low):
-            warns.append("No noodles or rice — include a noodle/rice base (Zev's staple + a "
+            fails.append("No noodles or rice — include a noodle/rice base (Zev's staple + a "
                          "shareable neutral for everyone).")
+    seen_bad = set()
     for term in prof.get("avoid_delivery", []):
         t = term.lower()
         for it in items:
-            if t in it.get("name", "").lower():
-                warns.append(f"Travels badly: '{it.get('name')}' — {term} don't survive "
+            nm = it.get("name", "")
+            # one blocker per offending ITEM, not per matching term ("soup dumpling"+"xlb")
+            if t in nm.lower() and nm not in seen_bad:
+                seen_bad.add(nm)
+                fails.append(f"Travels badly: '{nm}' — {term} don't survive "
                              f"delivery (dine-in only). Swap it out.")
 
     # ---- spicy is parents-only (kids + Noa can't handle it) ---------------
@@ -177,8 +181,56 @@ def check(order: dict) -> int:
             if any(w in nm for w in spicy_words):
                 served_kids = [w for w in it.get("for", []) if w in no_spice]
                 if served_kids:
-                    warns.append(f"SPICY '{it.get('name')}' is assigned to {served_kids} — "
+                    fails.append(f"SPICY '{it.get('name')}' is assigned to {served_kids} — "
                                  f"spicy is parents-only; give the kids a mild dish instead.")
+
+    # ---- unverifiable spice on a kid's dish --------------------------------
+    # 2026-08-14: "Cashew Chicken" and "Mixed Vegetable with Thai Basil" both
+    # arrived SPICY. Neither name contains a spice word, so the scan above
+    # passed them. A dish name does not tell you the spice level — so flag any
+    # kid-assigned dish that isn't structurally plain.
+    if prof.get("kids_no_spicy"):
+        plain_words = ("plain", "steamed", "boiled", "white rice", "jasmine rice", "brown rice",
+                       "satay", "skewer", "teriyaki", "nugget", "fries", "edamame",
+                       "cucumber", "california roll", "rice")
+        # NOTE: "noodle" is deliberately NOT here — pad thai / drunken noodles /
+        # pad ke mao are noodle dishes that arrive spicy.
+        # a "table" dish is shared — it reaches the kids too (the 2026-08-14 spicy
+        # Mixed Vegetable was labelled table-only and still landed in front of them)
+        no_spice = set(kids) | {"Noa", "table"}
+        for it in items:
+            nm = it.get("name", "")
+            served = [w for w in it.get("for", []) if w in no_spice]
+            if served and not any(p in nm.lower() for p in plain_words):
+                warns.append(
+                    f"SPICE UNVERIFIED: '{nm}' is assigned to {served} but isn't a plainly-mild "
+                    f"dish. A name without a spice word does NOT mean mild (burned us 2026-08-14). "
+                    f"Request mild explicitly, or keep this one parents-only."
+                )
+
+    # ---- per-person no-gos / soft avoids -----------------------------------
+    # `no_gos` are hard (blocker); `avoid_soft` are preferences we default away
+    # from but Idan can knowingly override (note). Matched on the item name, so
+    # only concrete food words work ("beef"); abstract ones ("adventurous") no-op.
+    for it in items:
+        nm = it.get("name", "")
+        nl = nm.lower()
+        for who in it.get("for", []):
+            pers = people.get(who)
+            if not pers:
+                continue
+            for term in pers.get("no_gos", []) or []:
+                t = str(term).strip().lower()
+                if t and t in nl:
+                    fails.append(f"NO-GO: '{nm}' is assigned to {who}, who doesn't eat "
+                                 f"'{term}'. Reassign it or pick a different protein.")
+            for term in pers.get("avoid_soft", []) or []:
+                t = str(term).strip().lower()
+                if t and t in nl:
+                    pref = pers.get("protein_preference") or []
+                    alt = (" Prefer " + " → ".join(pref) + ".") if pref else ""
+                    warns.append(f"AVOIDING: '{nm}' is assigned to {who}, who is trying to "
+                                 f"avoid '{term}'.{alt}")
 
     # ---- per-kid coverage --------------------------------------------------
     covered = set()
@@ -187,7 +239,7 @@ def check(order: dict) -> int:
             covered.add(who)
     for kid in kids:
         if kid not in covered:  # a shared "table" dish doesn't count — kids need their own
-            warns.append(
+            fails.append(
                 f"No item assigned to {kid} — assign them something they'll actually eat "
                 f"(esp. Zev, who's picky about plain food)."
             )
@@ -197,7 +249,7 @@ def check(order: dict) -> int:
         if noa.get("iron_priority"):
             has_iron = any(IRON_REGEX.search(it.get("name", "").lower()) for it in items)
             if not has_iron:
-                warns.append(
+                fails.append(
                     "IRON: no iron-rich item for Noa (she's iron-deficient — top priority). "
                     "Add soft beef / dark-meat chicken / tofu / lentils / spinach, ideally "
                     "with a vitamin-C side."
@@ -226,7 +278,8 @@ def check(order: dict) -> int:
         who = ", ".join(it.get("for", [])) or "table"
         line = float(it.get("price", 0)) * int(it.get("qty", 1))
         q = f"{it.get('qty',1)}× " if int(it.get('qty', 1)) > 1 else ""
-        print(f"    {q}{it.get('name'):<34} {money(line):>9}   ({who})")
+        label = f"{q}{it.get('name')}"          # pad the WHOLE label so the qty prefix
+        print(f"    {label:<34} {money(line):>9}   ({who})")   # doesn't shift the money column
     print("  " + "-" * 56)
     print(f"    {'Subtotal':<34} {money(subtotal):>9}")
     for k in ("delivery", "service", "tax", "tip"):
