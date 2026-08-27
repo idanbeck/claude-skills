@@ -28,6 +28,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -247,18 +248,16 @@ def cmd_playlists(args):
 
 def cmd_playlist(args):
     service = get_service(args.account)
-    result = service.playlistItems().list(
-        part="snippet",
-        playlistId=args.playlist_id,
-        maxResults=args.limit
-    ).execute()
+    raw = _paginate(service.playlistItems().list,
+                    {"part": "snippet", "playlistId": args.playlist_id},
+                    args.limit, getattr(args, "all", False))
 
     items = [{
         "playlistItemId": i["id"],
         "videoId": i["snippet"]["resourceId"]["videoId"],
         "title": i["snippet"]["title"],
         "position": i["snippet"]["position"],
-    } for i in result.get("items", [])]
+    } for i in raw]
 
     print(json.dumps({"playlistId": args.playlist_id, "items": items}, indent=2))
 
@@ -414,6 +413,160 @@ def cmd_upload(args):
     }, indent=2))
 
 
+# --- DJ crate support --------------------------------------------------------
+
+CRATE_DIR = Path.home() / ".claude" / "skills" / "beatport-skill" / "crates"
+
+# Noise that YouTube uploaders staple onto music titles.
+_YT_NOISE = re.compile(
+    r"[\(\[]\s*(?:official\s*)?(?:music\s*)?(?:video|audio|visualizer|visualiser|lyric[s]?"
+    r"|hd|4k|hq|full|free\s*download|out\s*now|premiere|radio\s*edit)\s*[^\)\]]*[\)\]]",
+    re.I)
+_YT_TAIL = re.compile(r"\s*[\|\u2013\u2014]\s*(?:official|out now|free download|premiere).*$", re.I)
+_MIX_RE = re.compile(r"[\(\[]([^)\]]*(?:mix|remix|edit|dub|version|vip|bootleg)[^)\]]*)[)\]]", re.I)
+
+
+def parse_yt_title(raw, channel=None):
+    """Best-effort 'Artist - Title' split from a YouTube video title.
+
+    YouTube has no structured artist/title, so this is heuristic. Anything it gets wrong
+    surfaces later as a low-confidence Beatport match, not as a silent bad purchase.
+    """
+    t = _YT_NOISE.sub(" ", raw or "")
+    t = _YT_TAIL.sub("", t)
+    mix_m = _MIX_RE.search(t)
+    mix = mix_m.group(1).strip() if mix_m else ""
+    t = re.sub(r"\s+", " ", t).strip(" -\u2013\u2014|")
+
+    artist, title = "", t
+    for sep in (" - ", " \u2013 ", " \u2014 ", " -- "):
+        if sep in t:
+            left, right = t.split(sep, 1)
+            artist, title = left.strip(), right.strip()
+            break
+    if not artist and channel:
+        # YouTube Music "<Artist> - Topic" channels are reliable.
+        if channel.endswith(" - Topic"):
+            artist = channel[: -len(" - Topic")].strip()
+        else:
+            artist = channel.strip()
+    title = _MIX_RE.sub("", title).strip(" -|")
+    return artist, re.sub(r"\s+", " ", title).strip(), mix
+
+
+def _iso8601_to_ms(dur):
+    m = re.match(r"^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$", dur or "")
+    if not m:
+        return None
+    d, h, mi, sec = (int(x) if x else 0 for x in m.groups())
+    return ((d * 24 + h) * 3600 + mi * 60 + sec) * 1000
+
+
+def _paginate(service_list, params, limit, fetch_all, page_size=50):
+    """Walk YouTube's pageToken pagination and return a flat item list."""
+    items, token = [], None
+    params = dict(params)
+    while True:
+        params["maxResults"] = min(page_size, 50)
+        if token:
+            params["pageToken"] = token
+        resp = service_list(**params).execute()
+        items.extend(resp.get("items", []))
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+        if not fetch_all and limit and len(items) >= limit:
+            break
+    return items[:limit] if (limit and not fetch_all) else items
+
+
+def _video_rows(service, videos):
+    rows = []
+    for v in videos:
+        sn = v.get("snippet", {})
+        vid = v.get("id") if isinstance(v.get("id"), str) else \
+            sn.get("resourceId", {}).get("videoId")
+        raw_title = sn.get("title", "")
+        channel = sn.get("videoOwnerChannelTitle") or sn.get("channelTitle")
+        artist, title, mix = parse_yt_title(raw_title, channel)
+        rows.append({
+            "source": "youtube",
+            "source_id": vid,
+            "url": f"https://www.youtube.com/watch?v={vid}" if vid else None,
+            "artist": artist,
+            "title": title,
+            "mix": mix,
+            "raw_title": raw_title,
+            "channel": channel,
+            "isrc": None,
+            "duration_ms": _iso8601_to_ms(
+                (v.get("contentDetails") or {}).get("duration")),
+            "added_at": sn.get("publishedAt"),
+            "bpm": None,
+            "key": None,
+        })
+    return rows
+
+
+def cmd_liked(args):
+    """Videos you gave a thumbs-up. This is the 'earmarked a track' list."""
+    service = get_service(args.account)
+    items = _paginate(service.videos().list,
+                      {"part": "snippet,contentDetails", "myRating": "like"},
+                      args.limit, args.all)
+    rows = _video_rows(service, items)
+    print(json.dumps({"count": len(rows), "tracks": rows}, indent=2, ensure_ascii=False))
+
+
+def cmd_export_crate(args):
+    service = get_service(args.account)
+    if args.playlist:
+        pid = args.playlist
+        if "list=" in pid:
+            pid = re.search(r"list=([A-Za-z0-9_-]+)", pid).group(1)
+        items = _paginate(service.playlistItems().list,
+                          {"part": "snippet,contentDetails", "playlistId": pid},
+                          args.limit, args.all)
+        # playlistItems lack duration; enrich in batches of 50.
+        ids = [i.get("contentDetails", {}).get("videoId") for i in items]
+        durations = {}
+        for i in range(0, len(ids), 50):
+            chunk = [x for x in ids[i:i + 50] if x]
+            if not chunk:
+                continue
+            for v in service.videos().list(
+                    part="contentDetails", id=",".join(chunk)).execute().get("items", []):
+                durations[v["id"]] = v.get("contentDetails", {}).get("duration")
+        for it in items:
+            vid = it.get("contentDetails", {}).get("videoId")
+            it.setdefault("contentDetails", {})["duration"] = durations.get(vid)
+        origin = f"youtube:playlist:{pid}"
+    else:
+        items = _paginate(service.videos().list,
+                          {"part": "snippet,contentDetails", "myRating": "like"},
+                          args.limit, args.all)
+        origin = "youtube:liked-videos"
+
+    rows = _video_rows(service, items)
+    crate = {
+        "crate_version": 1,
+        "name": args.name,
+        "origin": origin,
+        "generated_at": __import__("time").strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "note": "artist/title were parsed heuristically from YouTube video titles and have "
+                "no ISRC, so Beatport matching is fuzzy - review before buying.",
+        "tracks": rows,
+    }
+    out_path = Path(args.out) if args.out else (CRATE_DIR / f"{args.name}.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(crate, indent=2, ensure_ascii=False))
+    print(json.dumps({
+        "written": str(out_path), "count": len(rows), "origin": origin,
+        "unparsed_artist": [r["raw_title"] for r in rows if not r["artist"]],
+        "next": f"python3 ~/.claude/skills/beatport-skill/beatport_skill.py match {out_path}",
+    }, indent=2, ensure_ascii=False))
+
+
 def add_account_arg(p):
     p.add_argument("--account", "-a")
 
@@ -463,10 +616,26 @@ def main():
     add_account_arg(playlists)
     playlists.set_defaults(func=cmd_playlists)
 
+    liked = subs.add_parser("liked")
+    liked.add_argument("--limit", type=int, default=50)
+    liked.add_argument("--all", action="store_true")
+    add_account_arg(liked)
+    liked.set_defaults(func=cmd_liked)
+
+    xc = subs.add_parser("export-crate")
+    xc.add_argument("--name", required=True)
+    xc.add_argument("--playlist", help="playlist id or URL; omit to use liked videos")
+    xc.add_argument("--limit", type=int, default=None)
+    xc.add_argument("--all", action="store_true")
+    xc.add_argument("--out")
+    add_account_arg(xc)
+    xc.set_defaults(func=cmd_export_crate)
+
     playlist = subs.add_parser("playlist")
     playlist.add_argument("playlist_id")
     playlist.add_argument("--limit", "-l", type=int, default=50)
     add_account_arg(playlist)
+    playlist.add_argument("--all", action="store_true")
     playlist.set_defaults(func=cmd_playlist)
 
     create_pl = subs.add_parser("create-playlist")

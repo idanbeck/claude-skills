@@ -128,3 +128,10 @@ zergboard-skill/config.json
 zergboard-skill/bin/
 slack-skill/slack_bridge.log
 *.log
+
+# Beatport skill - user crates + discovered endpoint cache
+beatport-skill/crates/
+
+# Spotify skill (sensitive)
+spotify-skill/config.json
+spotify-skill/tokens/

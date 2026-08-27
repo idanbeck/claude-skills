@@ -1,0 +1,449 @@
+#!/usr/bin/env python3
+"""
+Spotify Skill - read liked songs, playlists, and top tracks; export a DJ crate.
+
+Standard library only (urllib + http.server). No pip installs.
+
+Usage:
+    python3 spotify_skill.py setup --client-id ID [--port 8899]
+    python3 spotify_skill.py login
+    python3 spotify_skill.py me
+    python3 spotify_skill.py liked [--limit N] [--all]
+    python3 spotify_skill.py playlists [--all]
+    python3 spotify_skill.py playlist PLAYLIST_ID_OR_URL [--limit N] [--all]
+    python3 spotify_skill.py top-tracks [--range short|medium|long] [--limit N]
+    python3 spotify_skill.py recently-played [--limit N]
+    python3 spotify_skill.py search "query" [--limit N]
+    python3 spotify_skill.py export-crate --name NAME (--liked | --playlist ID | --top) [--all] [--out PATH]
+    python3 spotify_skill.py logout
+"""
+
+import argparse
+import base64
+import hashlib
+import http.server
+import json
+import os
+import re
+import secrets
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import webbrowser
+from pathlib import Path
+
+SKILL_DIR = Path(__file__).parent
+CONFIG_FILE = SKILL_DIR / "config.json"
+TOKEN_FILE = SKILL_DIR / "tokens" / "spotify.json"
+CRATE_DIR = Path.home() / ".claude" / "skills" / "beatport-skill" / "crates"
+
+API = "https://api.spotify.com/v1"
+AUTH_URL = "https://accounts.spotify.com/authorize"
+TOKEN_URL = "https://accounts.spotify.com/api/token"
+
+# Read-only scopes. No playlist-modify / no streaming control.
+SCOPES = " ".join([
+    "user-read-private",
+    "user-library-read",
+    "playlist-read-private",
+    "playlist-read-collaborative",
+    "user-top-read",
+    "user-read-recently-played",
+])
+
+
+def die(msg, code=1):
+    print(json.dumps({"error": msg}, indent=2))
+    sys.exit(code)
+
+
+def load_config():
+    if not CONFIG_FILE.exists():
+        die("Not configured. Run: spotify_skill.py setup --client-id YOUR_CLIENT_ID "
+            "(create an app at https://developer.spotify.com/dashboard with redirect URI "
+            "http://127.0.0.1:8899/callback)")
+    return json.loads(CONFIG_FILE.read_text())
+
+
+def save_tokens(tok):
+    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tok = dict(tok)
+    if "expires_in" in tok:
+        tok["expires_at"] = int(time.time()) + int(tok["expires_in"]) - 60
+    TOKEN_FILE.write_text(json.dumps(tok, indent=2))
+    os.chmod(TOKEN_FILE, 0o600)
+    return tok
+
+
+def http_json(url, data=None, headers=None, method=None):
+    """Return (status, parsed_json_or_text)."""
+    body = None
+    hdrs = {"Accept": "application/json", "User-Agent": "claude-spotify-skill/1.0"}
+    if headers:
+        hdrs.update(headers)
+    if data is not None:
+        if isinstance(data, dict):
+            body = urllib.parse.urlencode(data).encode()
+            hdrs.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        else:
+            body = data
+    req = urllib.request.Request(url, data=body, headers=hdrs, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            raw = r.read().decode("utf-8", "replace")
+            return r.status, (json.loads(raw) if raw.strip() else {})
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(raw)
+        except Exception:
+            return e.code, {"raw": raw[:500]}
+
+
+# ---------------------------------------------------------------- auth (PKCE)
+
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+    result = {}
+
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        _CallbackHandler.result = {k: v[0] for k, v in q.items()}
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        ok = "code" in _CallbackHandler.result
+        self.wfile.write(
+            b"<h2>Spotify authorized. You can close this tab.</h2>" if ok
+            else b"<h2>Authorization failed. Check the terminal.</h2>")
+
+    def log_message(self, *a):
+        pass
+
+
+def do_login():
+    cfg = load_config()
+    port = int(cfg.get("port", 8899))
+    redirect = f"http://127.0.0.1:{port}/callback"
+
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(64)).decode().rstrip("=")
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    state = secrets.token_urlsafe(16)
+
+    url = AUTH_URL + "?" + urllib.parse.urlencode({
+        "client_id": cfg["client_id"],
+        "response_type": "code",
+        "redirect_uri": redirect,
+        "scope": SCOPES,
+        "code_challenge_method": "S256",
+        "code_challenge": challenge,
+        "state": state,
+    })
+
+    srv = http.server.HTTPServer(("127.0.0.1", port), _CallbackHandler)
+    threading.Thread(target=srv.handle_request, daemon=True).start()
+
+    print(json.dumps({"open_this_url": url}, indent=2), file=sys.stderr)
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+    deadline = time.time() + 180
+    while not _CallbackHandler.result and time.time() < deadline:
+        time.sleep(0.3)
+    srv.server_close()
+
+    res = _CallbackHandler.result
+    if "code" not in res:
+        die(f"No authorization code received: {res or 'timed out after 180s'}")
+    if res.get("state") != state:
+        die("State mismatch - aborting (possible CSRF).")
+
+    status, tok = http_json(TOKEN_URL, data={
+        "grant_type": "authorization_code",
+        "code": res["code"],
+        "redirect_uri": redirect,
+        "client_id": cfg["client_id"],
+        "code_verifier": verifier,
+    })
+    if status != 200 or "access_token" not in tok:
+        die(f"Token exchange failed ({status}): {tok}")
+    save_tokens(tok)
+    return tok
+
+
+def get_token():
+    if not CONFIG_FILE.exists():
+        load_config()   # dies with the full setup instructions
+    if not TOKEN_FILE.exists():
+        die("Not logged in. Run: spotify_skill.py login")
+    tok = json.loads(TOKEN_FILE.read_text())
+    if tok.get("expires_at", 0) > time.time():
+        return tok["access_token"]
+
+    cfg = load_config()
+    if not tok.get("refresh_token"):
+        die("Access token expired and no refresh token. Run: spotify_skill.py login")
+    status, new = http_json(TOKEN_URL, data={
+        "grant_type": "refresh_token",
+        "refresh_token": tok["refresh_token"],
+        "client_id": cfg["client_id"],
+    })
+    if status != 200 or "access_token" not in new:
+        die(f"Token refresh failed ({status}): {new}. Run: spotify_skill.py login")
+    new.setdefault("refresh_token", tok["refresh_token"])
+    return save_tokens(new)["access_token"]
+
+
+def api_get(path, **params):
+    url = path if path.startswith("http") else API + path
+    if params:
+        url += ("&" if "?" in url else "?") + urllib.parse.urlencode(
+            {k: v for k, v in params.items() if v is not None})
+    status, body = http_json(url, headers={"Authorization": f"Bearer {get_token()}"})
+    if status == 403:
+        die("403 from Spotify. Note: audio-features / audio-analysis / recommendations are "
+            "permanently disabled for apps created after 2024-11-27 - get BPM and key from "
+            f"Beatport instead. Response: {body}")
+    if status == 429:
+        die(f"Rate limited by Spotify. Wait and retry. Response: {body}")
+    if status >= 400:
+        die(f"Spotify API {status} on {url}: {body}")
+    return body
+
+
+def paged(path, limit, fetch_all, item_key="items", page_size=50, **params):
+    """Walk Spotify's next-cursor pagination. Returns a flat list of items."""
+    out, url = [], path
+    params = dict(params)
+    params["limit"] = min(page_size, limit if limit else page_size)
+    first = True
+    while url:
+        body = api_get(url, **(params if first else {}))
+        first = False
+        out.extend(body.get(item_key) or [])
+        url = body.get("next")
+        if not fetch_all and limit and len(out) >= limit:
+            break
+        if not fetch_all and not limit:
+            break
+    return out[:limit] if (limit and not fetch_all) else out
+
+
+# ------------------------------------------------------------- normalization
+
+_MIX_RE = re.compile(r"[\(\[]([^)\]]*(?:mix|remix|edit|dub|version|vip|bootleg)[^)\]]*)[)\]]", re.I)
+
+
+def norm_track(item):
+    """Flatten a Spotify track object into the shared crate track shape."""
+    t = item.get("track") or item
+    if not t or t.get("type") == "episode" or not t.get("id"):
+        return None
+    artists = [a["name"] for a in (t.get("artists") or [])]
+    title = t.get("name") or ""
+    m = _MIX_RE.search(title)
+    return {
+        "source": "spotify",
+        "source_id": t["id"],
+        "url": (t.get("external_urls") or {}).get("spotify"),
+        "artist": ", ".join(artists),
+        "artists": artists,
+        "title": title,
+        "mix": (m.group(1).strip() if m else ""),
+        "album": (t.get("album") or {}).get("name"),
+        "release_date": (t.get("album") or {}).get("release_date"),
+        "label": None,          # Spotify does not expose label on the track object
+        "isrc": (t.get("external_ids") or {}).get("isrc"),
+        "duration_ms": t.get("duration_ms"),
+        "explicit": t.get("explicit"),
+        "added_at": item.get("added_at") or item.get("played_at"),
+        # BPM / key deliberately absent: Spotify killed audio-features for new apps.
+        "bpm": None,
+        "key": None,
+    }
+
+
+def norm_list(items):
+    return [x for x in (norm_track(i) for i in items) if x]
+
+
+def parse_playlist_id(s):
+    s = s.strip()
+    if "spotify.com" in s:
+        m = re.search(r"/playlist/([A-Za-z0-9]+)", s)
+        if m:
+            return m.group(1)
+    if s.startswith("spotify:playlist:"):
+        return s.split(":")[-1]
+    return s
+
+
+# ------------------------------------------------------------------ commands
+
+def cmd_setup(args):
+    CONFIG_FILE.write_text(json.dumps(
+        {"client_id": args.client_id, "port": args.port}, indent=2))
+    os.chmod(CONFIG_FILE, 0o600)
+    print(json.dumps({
+        "saved": str(CONFIG_FILE),
+        "redirect_uri_to_register": f"http://127.0.0.1:{args.port}/callback",
+        "reminder": "Spotify rejects 'localhost' - the redirect URI must use the literal "
+                    "127.0.0.1. Add it in the app settings at developer.spotify.com/dashboard.",
+        "next": "spotify_skill.py login",
+    }, indent=2))
+
+
+def cmd_login(args):
+    do_login()
+    me = api_get("/me")
+    print(json.dumps({"success": True, "user": me.get("display_name"),
+                      "id": me.get("id"), "product": me.get("product")}, indent=2))
+
+
+def cmd_logout(args):
+    if TOKEN_FILE.exists():
+        TOKEN_FILE.unlink()
+    print(json.dumps({"success": True}, indent=2))
+
+
+def cmd_me(args):
+    me = api_get("/me")
+    print(json.dumps({"id": me.get("id"), "display_name": me.get("display_name"),
+                      "email": me.get("email"), "product": me.get("product"),
+                      "country": me.get("country")}, indent=2))
+
+
+def cmd_liked(args):
+    items = paged("/me/tracks", args.limit, args.all)
+    tracks = norm_list(items)
+    print(json.dumps({"count": len(tracks), "tracks": tracks}, indent=2))
+
+
+def cmd_playlists(args):
+    items = paged("/me/playlists", args.limit, args.all)
+    print(json.dumps({"count": len(items), "playlists": [{
+        "id": p["id"],
+        "name": p.get("name"),
+        "tracks": (p.get("tracks") or {}).get("total"),
+        "owner": (p.get("owner") or {}).get("display_name"),
+        "public": p.get("public"),
+        "url": (p.get("external_urls") or {}).get("spotify"),
+    } for p in items if p]}, indent=2))
+
+
+def cmd_playlist(args):
+    pid = parse_playlist_id(args.playlist_id)
+    meta = api_get(f"/playlists/{pid}", fields="name,description,tracks(total)")
+    items = paged(f"/playlists/{pid}/tracks", args.limit, args.all, page_size=100)
+    tracks = norm_list(items)
+    print(json.dumps({"playlist_id": pid, "name": meta.get("name"),
+                      "total": (meta.get("tracks") or {}).get("total"),
+                      "count": len(tracks), "tracks": tracks}, indent=2))
+
+
+def cmd_top_tracks(args):
+    rng = {"short": "short_term", "medium": "medium_term", "long": "long_term"}[args.range]
+    body = api_get("/me/top/tracks", time_range=rng, limit=min(args.limit or 50, 50))
+    tracks = norm_list(body.get("items") or [])
+    print(json.dumps({"range": rng, "count": len(tracks), "tracks": tracks}, indent=2))
+
+
+def cmd_recently_played(args):
+    body = api_get("/me/player/recently-played", limit=min(args.limit or 50, 50))
+    tracks = norm_list(body.get("items") or [])
+    print(json.dumps({"count": len(tracks), "tracks": tracks}, indent=2))
+
+
+def cmd_search(args):
+    body = api_get("/search", q=args.query, type="track", limit=min(args.limit or 20, 50))
+    tracks = norm_list((body.get("tracks") or {}).get("items") or [])
+    print(json.dumps({"query": args.query, "count": len(tracks), "tracks": tracks}, indent=2))
+
+
+def cmd_export_crate(args):
+    if args.playlist:
+        pid = parse_playlist_id(args.playlist)
+        meta = api_get(f"/playlists/{pid}", fields="name")
+        items = paged(f"/playlists/{pid}/tracks", args.limit, args.all, page_size=100)
+        origin = f"spotify:playlist:{pid} ({meta.get('name')})"
+    elif args.top:
+        items = (api_get("/me/top/tracks", time_range="short_term",
+                         limit=min(args.limit or 50, 50))).get("items") or []
+        origin = "spotify:top-tracks:short_term"
+    else:
+        items = paged("/me/tracks", args.limit, args.all)
+        origin = "spotify:liked-songs"
+
+    tracks = norm_list(items)
+    crate = {
+        "crate_version": 1,
+        "name": args.name,
+        "origin": origin,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "note": "bpm/key are null by design - Spotify's audio-features endpoint is disabled "
+                "for apps created after 2024-11-27. Fill them via beatport_skill.py match.",
+        "tracks": tracks,
+    }
+    out = Path(args.out) if args.out else (CRATE_DIR / f"{args.name}.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(crate, indent=2))
+    print(json.dumps({"written": str(out), "count": len(tracks),
+                      "with_isrc": sum(1 for t in tracks if t.get("isrc")),
+                      "origin": origin,
+                      "next": f"python3 ~/.claude/skills/beatport-skill/beatport_skill.py "
+                              f"match {out}"}, indent=2))
+
+
+def main():
+    p = argparse.ArgumentParser(description="Spotify Skill (read-only)")
+    subs = p.add_subparsers(dest="command")
+
+    s = subs.add_parser("setup"); s.add_argument("--client-id", required=True)
+    s.add_argument("--port", type=int, default=8899); s.set_defaults(func=cmd_setup)
+
+    subs.add_parser("login").set_defaults(func=cmd_login)
+    subs.add_parser("logout").set_defaults(func=cmd_logout)
+    subs.add_parser("me").set_defaults(func=cmd_me)
+
+    for name, fn in (("liked", cmd_liked), ("playlists", cmd_playlists)):
+        s = subs.add_parser(name)
+        s.add_argument("--limit", type=int, default=50)
+        s.add_argument("--all", action="store_true")
+        s.set_defaults(func=fn)
+
+    s = subs.add_parser("playlist"); s.add_argument("playlist_id")
+    s.add_argument("--limit", type=int, default=100)
+    s.add_argument("--all", action="store_true"); s.set_defaults(func=cmd_playlist)
+
+    s = subs.add_parser("top-tracks")
+    s.add_argument("--range", choices=["short", "medium", "long"], default="short")
+    s.add_argument("--limit", type=int, default=50); s.set_defaults(func=cmd_top_tracks)
+
+    s = subs.add_parser("recently-played")
+    s.add_argument("--limit", type=int, default=50); s.set_defaults(func=cmd_recently_played)
+
+    s = subs.add_parser("search"); s.add_argument("query")
+    s.add_argument("--limit", type=int, default=20); s.set_defaults(func=cmd_search)
+
+    s = subs.add_parser("export-crate"); s.add_argument("--name", required=True)
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--liked", action="store_true")
+    g.add_argument("--playlist")
+    g.add_argument("--top", action="store_true")
+    s.add_argument("--limit", type=int, default=None)
+    s.add_argument("--all", action="store_true")
+    s.add_argument("--out"); s.set_defaults(func=cmd_export_crate)
+
+    args = p.parse_args()
+    if not args.command:
+        p.print_help(); sys.exit(1)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
