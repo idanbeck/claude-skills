@@ -14,8 +14,20 @@ Uses Google OAuth (same as gmail-skill). Enable **YouTube Data API v3** in your 
 
 If you have gmail-skill set up, this should work. Otherwise:
 1. Enable YouTube Data API v3 at console.cloud.google.com
-2. Create/download OAuth credentials
+2. Create OAuth credentials, **Desktop app** type, and download the JSON
 3. Save to `~/.claude/skills/youtube-skill/credentials.json`
+
+**Dependencies.** This machine's Homebrew Python is PEP 668 externally-managed, so a plain
+`pip install` fails with `externally-managed-environment`. The libs live in a sibling venv:
+
+```bash
+uv venv ~/.claude/skills/youtube-skill/.venv --python 3.13
+uv pip install --python ~/.claude/skills/youtube-skill/.venv/bin/python \
+    google-api-python-client google-auth-oauthlib google-auth-httplib2
+```
+
+`youtube_skill.py` re-execs into that venv automatically, so you still invoke it as plain
+`python3 ~/.claude/skills/youtube-skill/youtube_skill.py ...` — no activation needed.
 
 ## Commands
 
