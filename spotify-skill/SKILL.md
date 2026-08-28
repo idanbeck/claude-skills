@@ -29,6 +29,26 @@ ISRC is exact rather than fuzzy. Always prefer a Spotify-sourced crate over a Yo
 
 ## Setup
 
+Two ways in. **(b) needs no app at all** — use it if the developer dashboard refuses to
+create one, which it does fairly often with a generic "Something went wrong".
+
+### (a) Pasted web-player token — fastest, no app
+
+Idan opens <https://open.spotify.com> logged in, DevTools > Network, filters on
+`api.spotify.com`, clicks any request, and copies the `Authorization` header after
+`Bearer `:
+
+```bash
+python3 ~/.claude/skills/spotify-skill/spotify_skill.py setup --token 'BQ...'
+```
+
+The web player's own token already carries the library scopes, so liked songs and
+playlists work immediately. **It expires after roughly an hour** and there is no refresh —
+on a 401 the skill says exactly how to re-copy it. Good for a one-off crate export;
+annoying if you're going to do this weekly.
+
+### (b) Registered app + PKCE — survives longer
+
 1. Create an app at <https://developer.spotify.com/dashboard>.
 2. Add the redirect URI **`http://127.0.0.1:8899/callback`**.
    **It must be the literal `127.0.0.1`.** Spotify explicitly rejects `localhost`; loopback
@@ -40,6 +60,14 @@ ISRC is exact rather than fuzzy. Always prefer a Spotify-sourced crate over a Yo
 python3 ~/.claude/skills/spotify-skill/spotify_skill.py setup --client-id YOUR_CLIENT_ID
 python3 ~/.claude/skills/spotify-skill/spotify_skill.py login
 ```
+
+**If "Create app" fails** with *"Something went wrong, we were not able to create your
+app"*: it is a long-standing dashboard bug, not something wrong with the form. Reported
+causes are an ad-blocker eating the POST, the loopback `http://` redirect URI tripping
+dashboard-side validation, and Web API access wanting a Premium account. Try incognito
+with extensions off; or create the app with a placeholder `https://example.org/callback`
+and add the `127.0.0.1` URI afterwards in Edit Settings, which is a different validator.
+If it still refuses, **use (a)** — it needs no app and gets the same data.
 
 `login` opens a browser and runs Authorization Code + PKCE against a one-shot local
 callback server. The refresh token is stored in `tokens/` (gitignored, chmod 600) and

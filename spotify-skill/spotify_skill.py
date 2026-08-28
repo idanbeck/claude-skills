@@ -177,26 +177,36 @@ def do_login():
 
 
 def get_token():
-    if not CONFIG_FILE.exists():
-        load_config()   # dies with the full setup instructions
-    if not TOKEN_FILE.exists():
-        die("Not logged in. Run: spotify_skill.py login")
-    tok = json.loads(TOKEN_FILE.read_text())
-    if tok.get("expires_at", 0) > time.time():
+    tok = json.loads(TOKEN_FILE.read_text()) if TOKEN_FILE.exists() else {}
+    cfg = json.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
+
+    # Live token from a completed PKCE login.
+    if tok.get("access_token") and tok.get("expires_at", 0) > time.time():
         return tok["access_token"]
 
-    cfg = load_config()
-    if not tok.get("refresh_token"):
-        die("Access token expired and no refresh token. Run: spotify_skill.py login")
-    status, new = http_json(TOKEN_URL, data={
-        "grant_type": "refresh_token",
-        "refresh_token": tok["refresh_token"],
-        "client_id": cfg["client_id"],
-    })
-    if status != 200 or "access_token" not in new:
+    # Expired but refreshable (PKCE mode).
+    if tok.get("refresh_token") and cfg.get("client_id"):
+        status, new = http_json(TOKEN_URL, data={
+            "grant_type": "refresh_token",
+            "refresh_token": tok["refresh_token"],
+            "client_id": cfg["client_id"],
+        })
+        if status == 200 and "access_token" in new:
+            new.setdefault("refresh_token", tok["refresh_token"])
+            return save_tokens(new)["access_token"]
         die(f"Token refresh failed ({status}): {new}. Run: spotify_skill.py login")
-    new.setdefault("refresh_token", tok["refresh_token"])
-    return save_tokens(new)["access_token"]
+
+    # Pasted web-player token: no expiry known, use until it 401s.
+    if tok.get("access_token"):
+        return tok["access_token"]
+
+    die("No Spotify token. Either:\n"
+        "  (a) paste one from your logged-in web player (no app needed):\n"
+        "      open open.spotify.com > DevTools > Network > filter 'api.spotify.com'\n"
+        "      > click a request > copy the Authorization header after 'Bearer '\n"
+        "      spotify_skill.py setup --token 'BQ...'\n"
+        "  (b) register an app and use PKCE:\n"
+        "      spotify_skill.py setup --client-id YOUR_CLIENT_ID && spotify_skill.py login")
 
 
 def api_get(path, **params):
@@ -205,6 +215,11 @@ def api_get(path, **params):
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(
             {k: v for k, v in params.items() if v is not None})
     status, body = http_json(url, headers={"Authorization": f"Bearer {get_token()}"})
+    if status == 401:
+        die("401 from Spotify - the token expired. Web-player tokens last about an hour: "
+            "re-copy it from open.spotify.com (DevTools > Network > any api.spotify.com "
+            "request > Authorization header) and run "
+            "`spotify_skill.py setup --token '<token>'` again.")
     if status == 403:
         die("403 from Spotify. Note: audio-features / audio-analysis / recommendations are "
             "permanently disabled for apps created after 2024-11-27 - get BPM and key from "
@@ -286,16 +301,35 @@ def parse_playlist_id(s):
 # ------------------------------------------------------------------ commands
 
 def cmd_setup(args):
-    CONFIG_FILE.write_text(json.dumps(
-        {"client_id": args.client_id, "port": args.port}, indent=2))
+    if not args.client_id and not args.token:
+        die("Pass either --token (paste from the web player, no app needed) "
+            "or --client-id (registered app, enables auto-refresh).")
+
+    if args.token:
+        save_tokens({"access_token": args.token.strip().replace("Bearer ", ""),
+                     "source": "pasted-from-web-player"})
+
+    cfg = json.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
+    if args.client_id:
+        cfg["client_id"] = args.client_id
+        cfg["port"] = args.port
+        cfg["mode"] = "pkce"
+    else:
+        cfg.setdefault("mode", "pasted-token")
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
     os.chmod(CONFIG_FILE, 0o600)
-    print(json.dumps({
-        "saved": str(CONFIG_FILE),
-        "redirect_uri_to_register": f"http://127.0.0.1:{args.port}/callback",
-        "reminder": "Spotify rejects 'localhost' - the redirect URI must use the literal "
-                    "127.0.0.1. Add it in the app settings at developer.spotify.com/dashboard.",
-        "next": "spotify_skill.py login",
-    }, indent=2))
+
+    result = {"saved": str(CONFIG_FILE), "mode": cfg.get("mode")}
+    if args.client_id:
+        result["redirect_uri_to_register"] = f"http://127.0.0.1:{args.port}/callback"
+        result["reminder"] = ("Spotify rejects 'localhost' - the redirect URI must use the "
+                              "literal 127.0.0.1.")
+        result["next"] = "spotify_skill.py login"
+    else:
+        result["note"] = ("Web-player tokens expire after roughly an hour. Re-run setup "
+                          "--token with a fresh one when you get a 401.")
+        result["next"] = "spotify_skill.py me"
+    print(json.dumps(result, indent=2))
 
 
 def cmd_login(args):
@@ -403,7 +437,9 @@ def main():
     p = argparse.ArgumentParser(description="Spotify Skill (read-only)")
     subs = p.add_subparsers(dest="command")
 
-    s = subs.add_parser("setup"); s.add_argument("--client-id", required=True)
+    s = subs.add_parser("setup")
+    s.add_argument("--client-id")
+    s.add_argument("--token", help="bearer token pasted from the Spotify web player")
     s.add_argument("--port", type=int, default=8899); s.set_defaults(func=cmd_setup)
 
     subs.add_parser("login").set_defaults(func=cmd_login)
