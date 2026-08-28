@@ -20,6 +20,7 @@ Usage:
 
 import argparse
 import base64
+import csv
 import hashlib
 import http.server
 import json
@@ -433,6 +434,132 @@ def cmd_export_crate(args):
                               f"match {out}"}, indent=2))
 
 
+# ------------------------------------------------------- CSV import (no API)
+
+# Spotify has had new developer-app creation frozen since Dec 2025, so the OAuth path
+# is unavailable to new apps. A CSV from an existing exporter (Exportify and friends
+# authorize against their own long-registered app) gets the same data, ISRC included.
+
+_COLS = {
+    "title":    ["track name", "name", "title", "song", "song name", "track"],
+    "artist":   ["artist name(s)", "artist name", "artist", "artists", "artist(s)",
+                 "artist names"],
+    "isrc":     ["isrc"],
+    "album":    ["album name", "album"],
+    "duration": ["track duration (ms)", "duration (ms)", "duration_ms", "duration ms",
+                 "duration"],
+    "url":      ["track uri", "track url", "spotify uri", "spotify url", "uri", "url"],
+    "added":    ["added at", "added_at", "date added"],
+    "release":  ["album release date", "release date", "released"],
+}
+
+
+def _pick(headers, keys):
+    """Map our field names onto whatever the CSV actually calls its columns."""
+    norm = {h.strip().lower(): h for h in headers if h}
+    found = {}
+    for field, names in keys.items():
+        for n in names:
+            if n in norm:
+                found[field] = norm[n]
+                break
+    return found
+
+
+def _dur_to_ms(v):
+    if not v:
+        return None
+    v = str(v).strip()
+    if re.fullmatch(r"\d+", v):
+        n = int(v)
+        # Heuristic: a bare number under ~10000 is seconds, above is milliseconds.
+        return n * 1000 if n < 10000 else n
+    m = re.fullmatch(r"(\d+):(\d{1,2})(?:\.\d+)?", v)
+    if m:
+        return (int(m.group(1)) * 60 + int(m.group(2))) * 1000
+    return None
+
+
+def cmd_import_csv(args):
+    src = Path(args.csv).expanduser()
+    if not src.exists():
+        die(f"CSV not found: {src}")
+
+    with src.open(newline="", encoding="utf-8-sig") as f:
+        sample = f.read(8192)
+        f.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+        except csv.Error:
+            dialect = csv.excel
+        rows = list(csv.DictReader(f, dialect=dialect))
+
+    if not rows:
+        die(f"{src} has no data rows.")
+
+    cols = _pick(rows[0].keys(), _COLS)
+    if "title" not in cols or "artist" not in cols:
+        die(f"Could not find artist and title columns in {src}. "
+            f"Saw: {sorted(k for k in rows[0].keys() if k)}. "
+            f"Rename the columns to 'Artist Name(s)' and 'Track Name', or pass a "
+            f"different export.")
+
+    tracks, skipped = [], 0
+    for r in rows:
+        title = (r.get(cols["title"]) or "").strip()
+        artist = (r.get(cols["artist"]) or "").strip()
+        if not title or not artist:
+            skipped += 1
+            continue
+        uri = (r.get(cols.get("url", "")) or "").strip()
+        sid = None
+        m = re.search(r"(?:track[:/])([A-Za-z0-9]{22})", uri)
+        if m:
+            sid = m.group(1)
+        mix = _MIX_RE.search(title)
+        isrc = (r.get(cols.get("isrc", "")) or "").strip().upper() or None
+        tracks.append({
+            "source": "spotify-csv",
+            "source_id": sid,
+            "url": (f"https://open.spotify.com/track/{sid}" if sid else (uri or None)),
+            "artist": artist,
+            "artists": [a.strip() for a in re.split(r"\s*,\s*", artist) if a.strip()],
+            "title": title,
+            "mix": (mix.group(1).strip() if mix else ""),
+            "album": (r.get(cols.get("album", "")) or "").strip() or None,
+            "release_date": (r.get(cols.get("release", "")) or "").strip() or None,
+            "label": None,
+            "isrc": isrc,
+            "duration_ms": _dur_to_ms(r.get(cols.get("duration", ""))),
+            "added_at": (r.get(cols.get("added", "")) or "").strip() or None,
+            "bpm": None,
+            "key": None,
+        })
+
+    crate = {
+        "crate_version": 1,
+        "name": args.name,
+        "origin": f"csv:{src.name}",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "note": "Imported from a CSV export. bpm/key are filled in by beatport match.",
+        "tracks": tracks,
+    }
+    out_path = Path(args.out) if args.out else (CRATE_DIR / f"{args.name}.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(crate, indent=2, ensure_ascii=False))
+
+    with_isrc = sum(1 for t in tracks if t["isrc"])
+    print(json.dumps({
+        "written": str(out_path),
+        "count": len(tracks),
+        "skipped_rows_missing_artist_or_title": skipped,
+        "with_isrc": with_isrc,
+        "isrc_coverage": f"{round(100 * with_isrc / len(tracks))}%" if tracks else "0%",
+        "columns_used": cols,
+        "next": f"python3 ~/.claude/skills/beatport-skill/beatport_skill.py match {out_path}",
+    }, indent=2, ensure_ascii=False))
+
+
 def main():
     p = argparse.ArgumentParser(description="Spotify Skill (read-only)")
     subs = p.add_subparsers(dest="command")
@@ -474,6 +601,12 @@ def main():
     s.add_argument("--limit", type=int, default=None)
     s.add_argument("--all", action="store_true")
     s.add_argument("--out"); s.set_defaults(func=cmd_export_crate)
+
+    s = subs.add_parser("import-csv")
+    s.add_argument("csv")
+    s.add_argument("--name", required=True)
+    s.add_argument("--out")
+    s.set_defaults(func=cmd_import_csv)
 
     args = p.parse_args()
     if not args.command:

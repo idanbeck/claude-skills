@@ -32,11 +32,39 @@ ISRC is exact rather than fuzzy. Always prefer a Spotify-sourced crate over a Yo
 Two ways in. **(b) needs no app at all** — use it if the developer dashboard refuses to
 create one, which it does fairly often with a generic "Something went wrong".
 
-### (a) Pasted web-player token — fastest, no app
+### (a) CSV import — the one that works right now
 
-Idan opens <https://open.spotify.com> logged in, DevTools > Network, filters on
-`api.spotify.com`, clicks any request, and copies the `Authorization` header after
-`Bearer `:
+**Spotify froze new developer-app creation in Dec 2025** and it is still frozen. The
+dashboard shows a Create app button that fails with a generic *"Something went wrong, we
+were not able to create your app"*, or says outright *"New integrations are currently on
+hold"*. Nothing about the form is wrong and retrying will not help.
+
+Route around it with an existing exporter — those authorize against apps registered long
+before the freeze, so they still work:
+
+1. <https://exportify.net> (open source, browser-only, read-only) - log in, export the
+   playlist or Liked Songs to CSV.
+2. Import it:
+
+```bash
+python3 ~/.claude/skills/spotify-skill/spotify_skill.py import-csv ~/Downloads/friday.csv --name friday
+```
+
+Exportify's CSV carries **ISRC**, which is the field that makes Beatport matching exact —
+so this path loses nothing that matters. The importer maps columns by name and handles
+other exporters too (semicolon-delimited, `mm:ss` durations, missing ISRC); it reports
+which columns it used and the ISRC coverage.
+
+### (b) Pasted web-player token — works, but off the sanctioned path
+
+⚠️ **Tell Idan the tradeoff before he does this.** Spotify's own API response calls
+usage of the web player's token endpoint "not permitted under the Spotify Developer Terms
+and Developer Policy". Reusing your own session token is his call on his own account, but
+it is not a sanctioned integration path — prefer (a).
+
+Note the web player no longer calls `api.spotify.com` much, so filtering on that shows an
+empty Network tab. Filter on **`spotify.com`** and look for `api-partner.spotify.com` or
+`spclient.spotify.com` rows instead, then copy the `Authorization` header after `Bearer `:
 
 ```bash
 python3 ~/.claude/skills/spotify-skill/spotify_skill.py setup --token 'BQ...'
@@ -47,7 +75,7 @@ playlists work immediately. **It expires after roughly an hour** and there is no
 on a 401 the skill says exactly how to re-copy it. Good for a one-off crate export;
 annoying if you're going to do this weekly.
 
-### (b) Registered app + PKCE — survives longer
+### (c) Registered app + PKCE — best, if the freeze ever lifts
 
 1. Create an app at <https://developer.spotify.com/dashboard>.
 2. Add the redirect URI **`http://127.0.0.1:8899/callback`**.

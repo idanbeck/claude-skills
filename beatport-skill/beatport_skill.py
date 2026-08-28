@@ -413,10 +413,19 @@ def score_match(crate_track, bp):
     if cm and bm:
         s += 0.06 if difflib.SequenceMatcher(None, cm, bm).ratio() > 0.7 else -0.06
 
+    _REMIX_WORD = r"\b(remix|vip|bootleg|rework|refix|flip)\b"
     remixer_toks = _sig_tokens(" ".join(bp.get("remixers") or []))
     bp_mix_raw = _fold_keep(bp.get("mix"))
-    bp_is_remix = bool(remixer_toks) or bool(
-        re.search(r"\b(remix|vip|bootleg|rework|refix|flip)\b", bp_mix_raw))
+    bp_is_remix = bool(remixer_toks) or bool(re.search(_REMIX_WORD, bp_mix_raw))
+
+    # Symmetric guard: the crate asking for a remix and Beatport offering the original is
+    # the same expensive mistake as the reverse. "Grey (Tale Of Us Remix)" must not match
+    # a plain "Grey".
+    crate_wants_remix = bool(re.search(
+        _REMIX_WORD, _fold_keep(f"{crate_track.get('title')} {crate_track.get('mix')}")))
+    if crate_wants_remix and not bp_is_remix:
+        s -= 0.35
+
     if bp_is_remix:
         # Did the crate side actually ask for this remix? Spotify folds the remixer into
         # the track title ("Grey (Tale Of Us Remix)"), so look at title + mix, brackets
