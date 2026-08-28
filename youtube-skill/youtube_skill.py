@@ -26,10 +26,15 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import os
 import re
 import sys
+import threading
+import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 # Homebrew Python is PEP 668 externally-managed, so the Google client libs live in a
@@ -424,6 +429,11 @@ def cmd_upload(args):
 
 CRATE_DIR = Path.home() / ".claude" / "skills" / "beatport-skill" / "crates"
 
+
+def die_json(msg):
+    print(json.dumps({"error": msg}, indent=2))
+    sys.exit(1)
+
 # Noise that YouTube uploaders staple onto music titles.
 _YT_NOISE = re.compile(
     r"[\(\[]\s*(?:official\s*)?(?:music\s*)?(?:video|audio|visualizer|visualiser|lyric[s]?"
@@ -513,6 +523,128 @@ def _video_rows(service, videos):
             "key": None,
         })
     return rows
+
+
+def _oembed(video_id, timeout=15):
+    """Resolve a video id to title + channel via oEmbed - no API key, no quota."""
+    url = ("https://www.youtube.com/oembed?url="
+           + urllib.parse.quote(f"https://www.youtube.com/watch?v={video_id}", safe="")
+           + "&format=json")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "claude-youtube-skill/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+        return {"title": d.get("title"), "channel": d.get("author_name")}
+    except Exception as e:
+        return {"error": type(e).__name__}
+
+
+def cmd_import_takeout(args):
+    """Turn a Google Takeout playlist CSV (video ids only) into a crate.
+
+    Takeout exports 'Liked videos.csv' and one CSV per playlist, each carrying video ids
+    but no titles. oEmbed fills those in without any Cloud project, OAuth, or quota - so
+    this is the fast path when you don't want the console setup.
+    """
+    src = Path(args.csv).expanduser()
+    if not src.exists():
+        die_json(f"CSV not found: {src}")
+
+    with src.open(newline="", encoding="utf-8-sig") as f:
+        text = f.read()
+    # Takeout sometimes prefixes a header block before the real CSV header.
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    start = 0
+    for i, ln in enumerate(lines):
+        if "video id" in ln.lower():
+            start = i
+            break
+    rows = list(csv.DictReader(lines[start:]))
+    if not rows:
+        die_json(f"No rows found in {src}")
+
+    id_col = None
+    for k in (rows[0].keys() if rows else []):
+        if k and "video id" in k.strip().lower():
+            id_col = k
+            break
+    if not id_col:
+        die_json(f"No 'Video ID' column in {src}. Saw: {sorted(k for k in rows[0] if k)}")
+
+    ts_col = next((k for k in rows[0] if k and "timestamp" in k.lower()), None)
+    ids = []
+    for r in rows:
+        vid = (r.get(id_col) or "").strip()
+        if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+            ids.append((vid, (r.get(ts_col) or "").strip() if ts_col else None))
+    if not ids:
+        die_json(f"No valid video ids in {src}")
+    if args.limit:
+        ids = ids[: args.limit]
+
+    resolved = {}
+    lock = threading.Lock()
+
+    def work(item):
+        vid, _ = item
+        info = _oembed(vid)
+        with lock:
+            resolved[vid] = info
+
+    threads = []
+    for item in ids:
+        while len([t for t in threads if t.is_alive()]) >= args.workers:
+            time.sleep(0.05)
+        t = threading.Thread(target=work, args=(item,), daemon=True)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join(timeout=30)
+
+    tracks, failed = [], []
+    for vid, ts in ids:
+        info = resolved.get(vid) or {}
+        if info.get("error") or not info.get("title"):
+            failed.append(vid)
+            continue
+        artist, title, mix = parse_yt_title(info["title"], info.get("channel"))
+        tracks.append({
+            "source": "youtube",
+            "source_id": vid,
+            "url": f"https://www.youtube.com/watch?v={vid}",
+            "artist": artist,
+            "title": title,
+            "mix": mix,
+            "raw_title": info["title"],
+            "channel": info.get("channel"),
+            "isrc": None,
+            "duration_ms": None,
+            "added_at": ts,
+            "bpm": None,
+            "key": None,
+        })
+
+    crate = {
+        "crate_version": 1,
+        "name": args.name,
+        "origin": f"youtube-takeout:{src.name}",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "note": "Titles resolved via oEmbed. Artist/title are parsed heuristically and "
+                "there is no ISRC, so Beatport matches here are fuzzy - review them.",
+        "tracks": tracks,
+    }
+    out_path = Path(args.out) if args.out else (CRATE_DIR / f"{args.name}.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(crate, indent=2, ensure_ascii=False))
+    print(json.dumps({
+        "written": str(out_path),
+        "video_ids_read": len(ids),
+        "resolved": len(tracks),
+        "failed_or_private": failed[:20],
+        "failed_count": len(failed),
+        "unparsed_artist": [t["raw_title"] for t in tracks if not t["artist"]][:20],
+        "next": f"python3 ~/.claude/skills/beatport-skill/beatport_skill.py match {out_path}",
+    }, indent=2, ensure_ascii=False))
 
 
 def cmd_liked(args):
@@ -622,6 +754,14 @@ def main():
     playlists.add_argument("--channel", "-c")
     add_account_arg(playlists)
     playlists.set_defaults(func=cmd_playlists)
+
+    tk = subs.add_parser("import-takeout")
+    tk.add_argument("csv")
+    tk.add_argument("--name", required=True)
+    tk.add_argument("--out")
+    tk.add_argument("--limit", type=int)
+    tk.add_argument("--workers", type=int, default=8)
+    tk.set_defaults(func=cmd_import_takeout)
 
     liked = subs.add_parser("liked")
     liked.add_argument("--limit", type=int, default=50)

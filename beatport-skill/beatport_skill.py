@@ -81,6 +81,24 @@ MY_ENDPOINT_CANDIDATES = [
 ]
 
 
+def jwt_exp(token):
+    """Read `exp` out of a JWT without verifying it. Beatport access tokens live only
+    ~10 minutes, so knowing the remaining seconds up front beats a bare 401."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return int(json.loads(base64.urlsafe_b64decode(payload)).get("exp"))
+    except Exception:
+        return None
+
+
+def token_life(token):
+    exp = jwt_exp(token)
+    if not exp:
+        return None
+    return int(exp - time.time())
+
+
 def die(msg, code=1):
     print(json.dumps({"error": msg}, indent=2))
     sys.exit(code)
@@ -238,7 +256,27 @@ def get_token():
         "or `login` if you have a client_id.")
 
 
+_EXPIRY_WARNED = []
+
+
+def _check_expiry(quiet=False):
+    left = token_life(get_token())
+    if left is None:
+        return
+    if left <= 0 and not quiet:
+        die(f"Beatport token expired {abs(left)}s ago. These last only ~10 minutes, so "
+            f"grab a fresh one and re-run immediately:\n"
+            f"  beatport.com > DevTools > Network > filter 'api.beatport.com' > reload >\n"
+            f"  any row > Headers > Request Headers > copy after 'Bearer '\n"
+            f"  beatport_skill.py setup --token '<token>'")
+    if 0 < left < 120 and not _EXPIRY_WARNED:
+        _EXPIRY_WARNED.append(1)
+        print(f"WARNING: Beatport token expires in {left}s - long runs will fail partway.",
+              file=sys.stderr)
+
+
 def api_get(path, params=None, quiet=False):
+    _check_expiry(quiet)
     url = path if path.startswith("http") else API + ("" if path.startswith("/") else "/") + path
     if params:
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(
@@ -459,10 +497,12 @@ def bp_search_tracks(q, limit=20):
 
 def cmd_setup(args):
     cfg = json.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
+    life = None
     if args.token:
-        save_tokens({"access_token": args.token.strip().replace("Bearer ", ""),
-                     "source": "pasted-from-browser"})
+        tk = args.token.strip().replace("Bearer ", "")
+        save_tokens({"access_token": tk, "source": "pasted-from-browser"})
         cfg.setdefault("mode", "pasted-token")
+        life = token_life(tk)
     if args.client_id:
         cfg["client_id"] = args.client_id
         cfg["port"] = args.port
@@ -470,16 +510,27 @@ def cmd_setup(args):
     if args.redirect_uri:
         cfg["redirect_uri"] = args.redirect_uri
     save_config(cfg)
-    out({"saved": str(CONFIG_FILE), "mode": cfg.get("mode"),
-         "redirect_uri": cfg.get("redirect_uri") or f"http://127.0.0.1:{args.port}/callback",
-         "next": "beatport_skill.py auth-status"})
+    res = {"saved": str(CONFIG_FILE), "mode": cfg.get("mode"),
+           "next": "beatport_skill.py auth-status"}
+    if life is not None:
+        res["token_expires_in_seconds"] = life
+        res["token_status"] = ("EXPIRED - grab a fresh one" if life <= 0
+                               else f"valid for {life // 60}m {life % 60}s")
+    out(res)
 
 
 def cmd_auth_status(args):
+    life = token_life(get_token())
     status, body = api_get("/my/account/", quiet=True)
-    out({"http": status, "authenticated": status == 200,
-         "account": body if status == 200 else None,
-         "detail": None if status == 200 else body})
+    res = {"http": status, "authenticated": status == 200}
+    if life is not None:
+        res["token_expires_in_seconds"] = life
+        res["token_status"] = (f"EXPIRED {abs(life)}s ago - grab a fresh one" if life <= 0
+                               else f"valid for {life // 60}m {life % 60}s")
+    res["account"] = body if status == 200 else None
+    if status != 200:
+        res["detail"] = body
+    out(res)
 
 
 def cmd_probe(args):
@@ -717,15 +768,21 @@ def cmd_report(args):
     rows = []
     for t in crate["tracks"]:
         bp = t.get("beatport") or {}
+        # Beatport is authoritative; fall back to whatever the source export carried so a
+        # crate can be ordered before (or without) matching.
+        bpm = bp.get("bpm") or t.get("bpm")
+        key = bp.get("key") or t.get("key")
+        camelot = bp.get("camelot") or to_camelot(key)
         rows.append({
             "artist": bp.get("artist") or t.get("artist"),
             "title": bp.get("title") or t.get("title"),
             "mix": bp.get("mix") or t.get("mix"),
-            "bpm": bp.get("bpm"),
-            "key": bp.get("key"),
-            "camelot": bp.get("camelot"),
-            "label": bp.get("label"),
-            "have_metadata": bool(bp.get("bpm") and bp.get("camelot")),
+            "bpm": bpm,
+            "key": key,
+            "camelot": camelot,
+            "label": bp.get("label") or t.get("label"),
+            "bpm_source": "beatport" if bp.get("bpm") else ("source-export" if t.get("bpm") else None),
+            "have_metadata": bool(bpm and camelot),
         })
 
     usable = [r for r in rows if r["have_metadata"]]

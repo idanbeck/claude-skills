@@ -56,6 +56,25 @@ python3 ~/.claude/skills/youtube-skill/youtube_skill.py add-to-playlist PLAYLIST
 python3 ~/.claude/skills/youtube-skill/youtube_skill.py remove-from-playlist PLAYLIST_ITEM_ID
 ```
 
+### Export without any Google Cloud setup (fastest)
+
+The OAuth path below needs ~15 minutes of Cloud console clicking. To skip all of it:
+
+1. <https://takeout.google.com> &rarr; **Deselect all** &rarr; tick **YouTube and YouTube
+   Music** &rarr; *All YouTube data included* &rarr; keep only **playlists** &rarr; export.
+2. The zip contains `Liked videos.csv` and one CSV per playlist - video ids, no titles.
+3. Resolve the titles and build a crate:
+
+```bash
+python3 ~/.claude/skills/youtube-skill/youtube_skill.py import-takeout \
+    "~/Downloads/Takeout/YouTube and YouTube Music/playlists/Liked videos.csv" \
+    --name friday-yt
+```
+
+`import-takeout` resolves each id through YouTube's **oEmbed** endpoint, which needs no API
+key, no OAuth and has no quota. It reports ids it could not resolve (deleted or private
+videos) rather than dropping them silently. `--workers` (default 8) controls concurrency.
+
 ### Liked videos (earmarked tracks)
 
 ```bash

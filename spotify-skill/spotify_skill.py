@@ -451,7 +451,33 @@ _COLS = {
     "url":      ["track uri", "track url", "spotify uri", "spotify url", "uri", "url"],
     "added":    ["added at", "added_at", "date added"],
     "release":  ["album release date", "release date", "released"],
+    "label":    ["record label", "label"],
+    "genres":   ["genres", "genre", "artist genres"],
+    "bpm":      ["tempo", "bpm"],
+    "key":      ["key"],
+    "mode":     ["mode"],
+    "popularity": ["popularity"],
 }
+
+# Spotify encodes key as a pitch class 0-11 and mode as 1=major / 0=minor. Flat-preferring
+# names so they feed straight into beatport-skill's Camelot table.
+_PITCH = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+
+
+def _key_name(key_val, mode_val):
+    """'7' + '1' -> 'G Major'. Passes through a name that is already spelled out."""
+    if key_val is None or str(key_val).strip() == "":
+        return None
+    raw = str(key_val).strip()
+    if re.fullmatch(r"-?\d+", raw):
+        k = int(raw)
+        if not 0 <= k <= 11:
+            return None
+        mode = str(mode_val).strip()
+        if mode in ("0", "1"):
+            return f"{_PITCH[k]} {'Major' if mode == '1' else 'Minor'}"
+        return None
+    return raw   # already something like "A Minor"
 
 
 def _pick(headers, keys):
@@ -464,6 +490,13 @@ def _pick(headers, keys):
                 found[field] = norm[n]
                 break
     return found
+
+
+def _num(v):
+    try:
+        return round(float(str(v).strip()), 2)
+    except (TypeError, ValueError):
+        return None
 
 
 def _dur_to_ms(v):
@@ -523,17 +556,23 @@ def cmd_import_csv(args):
             "source_id": sid,
             "url": (f"https://open.spotify.com/track/{sid}" if sid else (uri or None)),
             "artist": artist,
-            "artists": [a.strip() for a in re.split(r"\s*,\s*", artist) if a.strip()],
+            "artists": [a.strip() for a in re.split(r"\s*[;,]\s*", artist) if a.strip()],
             "title": title,
             "mix": (mix.group(1).strip() if mix else ""),
             "album": (r.get(cols.get("album", "")) or "").strip() or None,
             "release_date": (r.get(cols.get("release", "")) or "").strip() or None,
-            "label": None,
+            "label": (r.get(cols.get("label", "")) or "").strip() or None,
+            "genres": [g.strip() for g in
+                       re.split(r"\s*[;,]\s*", (r.get(cols.get("genres", "")) or ""))
+                       if g.strip()] or None,
+            "popularity": (r.get(cols.get("popularity", "")) or "").strip() or None,
             "isrc": isrc,
             "duration_ms": _dur_to_ms(r.get(cols.get("duration", ""))),
             "added_at": (r.get(cols.get("added", "")) or "").strip() or None,
-            "bpm": None,
-            "key": None,
+            # Provisional: some exporters still carry Spotify's audio-features. Treat as a
+            # hint for filtering/ordering; Beatport's values are authoritative.
+            "bpm": _num(r.get(cols.get("bpm", ""))),
+            "key": _key_name(r.get(cols.get("key", "")), r.get(cols.get("mode", ""))),
         })
 
     crate = {
@@ -555,6 +594,9 @@ def cmd_import_csv(args):
         "skipped_rows_missing_artist_or_title": skipped,
         "with_isrc": with_isrc,
         "isrc_coverage": f"{round(100 * with_isrc / len(tracks))}%" if tracks else "0%",
+        "with_bpm": sum(1 for t in tracks if t.get("bpm")),
+        "with_key": sum(1 for t in tracks if t.get("key")),
+        "with_label": sum(1 for t in tracks if t.get("label")),
         "columns_used": cols,
         "next": f"python3 ~/.claude/skills/beatport-skill/beatport_skill.py match {out_path}",
     }, indent=2, ensure_ascii=False))
