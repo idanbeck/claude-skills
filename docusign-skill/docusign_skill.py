@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import shutil
 import os
 import sys
 import time
@@ -45,9 +46,11 @@ except ImportError:
     _SDK_OK = False
 
 SKILL_DIR = Path.home() / ".claude" / "skills" / "docusign-skill"
-CREDS_FILE = SKILL_DIR / "credentials.json"
+_PROFILE = os.environ.get("DOCUSIGN_PROFILE", "").strip()
+_SUFFIX = f".{_PROFILE}" if _PROFILE else ""
+CREDS_FILE = SKILL_DIR / f"credentials{_SUFFIX}.json"
 TOKENS_DIR = SKILL_DIR / "tokens"
-PRIVATE_KEY_FILE = SKILL_DIR / "private.key"
+PRIVATE_KEY_FILE = SKILL_DIR / f"private{_SUFFIX}.key"
 
 # DocuSign OAuth endpoints
 DEMO_OAUTH = "https://account-d.docusign.com"
@@ -445,6 +448,73 @@ def cmd_download(args):
     print(json.dumps({"saved": str(out), "envelope_id": args.envelope_id}, indent=2))
 
 
+
+def cmd_bulk_download(args):
+    """Download every envelope (combined PDF + certificate) changed in the last N days."""
+    import time
+    creds = load_creds()
+    client, account_id, _ = get_api_client(creds)
+    envelopes_api = EnvelopesApi(client)
+    out_root = Path(args.output).expanduser()
+    out_root.mkdir(parents=True, exist_ok=True)
+    from_date = (datetime.utcnow() - timedelta(days=args.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    statuses = args.status or "completed,sent,delivered,signed,declined,voided,created"
+    manifest_path = out_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    start = 0; page = 100; total = 0; downloaded = 0; skipped = 0; errors = []
+    while True:
+        res = envelopes_api.list_status_changes(account_id, from_date=from_date, status=statuses,
+                                                count=str(page), start_position=str(start), include="recipients")
+        envs = res.envelopes or []
+        if not envs: break
+        for e in envs:
+            total += 1
+            eid = e.envelope_id
+            subj = (e.email_subject or "untitled")
+            safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", subj).strip()[:80]
+            when = (e.completed_date_time or e.status_changed_date_time or e.sent_date_time or "")[:10]
+            folder = out_root / f"{when}__{safe}__{eid[:8]}"
+            if folder.exists() and manifest.get(eid, {}).get("done") and not args.force:
+                skipped += 1; continue
+            folder.mkdir(exist_ok=True)
+            try:
+                combined = envelopes_api.get_document(account_id, "combined", eid)
+                shutil.copy(combined, folder / "combined.pdf")
+                if args.separate:
+                    docs = envelopes_api.list_documents(account_id, eid)
+                    for d in docs.envelope_documents or []:
+                        if d.document_id in ("certificate",): continue
+                        f = envelopes_api.get_document(account_id, d.document_id, eid)
+                        shutil.copy(f, folder / (re.sub(r"[^A-Za-z0-9._ -]+","_",d.name or d.document_id)[:100] + (".pdf" if not (d.name or "").lower().endswith(".pdf") else "")))
+                try:
+                    cert = envelopes_api.get_document(account_id, "certificate", eid)
+                    shutil.copy(cert, folder / "certificate_of_completion.pdf")
+                except Exception as ce:
+                    pass
+                recips = []
+                try:
+                    r = e.recipients
+                    for s_ in (r.signers or []) if r else []:
+                        recips.append({"name": s_.name, "email": s_.email, "status": s_.status, "signed": s_.signed_date_time})
+                except Exception:
+                    pass
+                manifest[eid] = {"subject": subj, "status": e.status, "sent": e.sent_date_time,
+                                 "completed": e.completed_date_time, "folder": folder.name,
+                                 "signers": recips, "done": True}
+                (folder / "envelope.json").write_text(json.dumps(manifest[eid], indent=2, default=str))
+                downloaded += 1
+                sys.stderr.write(f"  ✓ {when} {subj[:60]} [{e.status}]\n")
+            except Exception as ex:
+                errors.append({"envelope_id": eid, "subject": subj, "error": str(ex)[:200]})
+                sys.stderr.write(f"  ✗ {subj[:60]}: {str(ex)[:120]}\n")
+            manifest_path.write_text(json.dumps(manifest, indent=2, default=str))
+            time.sleep(args.sleep)
+        if len(envs) < page: break
+        start += page
+    print(json.dumps({"listed": total, "downloaded": downloaded, "skipped": skipped, "errors": errors,
+                      "output": str(out_root), "manifest": str(manifest_path)}, indent=2))
+
+
 def cmd_bulk_send(args):
     """Send multiple envelopes from a JSON spec file.
 
@@ -553,6 +623,15 @@ def main():
     p.add_argument("--output", help="Output PDF path (default: ENVELOPE_ID.pdf)")
     p.add_argument("--document-id", help="Specific document id (default: 'combined')")
     p.set_defaults(func=cmd_download)
+
+    p = sub.add_parser("bulk-download", help="Download every envelope changed in the last N days (combined PDF + certificate)")
+    p.add_argument("--days", type=int, default=365)
+    p.add_argument("--output", default="~/Downloads/docusign-export")
+    p.add_argument("--status", help="comma list; default = all statuses")
+    p.add_argument("--separate", action="store_true", help="also save each document separately")
+    p.add_argument("--force", action="store_true", help="re-download envelopes already in manifest")
+    p.add_argument("--sleep", type=float, default=0.3, help="pause between envelopes (rate-limit courtesy)")
+    p.set_defaults(func=cmd_bulk_download)
 
     p = sub.add_parser("bulk-send", help="Send multiple envelopes from a JSON spec")
     p.add_argument("spec", help="Path to JSON spec file")

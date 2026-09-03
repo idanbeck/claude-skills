@@ -153,6 +153,30 @@ If you're using a different template style, override per-send:
 --anchor-tabs '\sig\=signature,\date\=date'
 ```
 
+## Bulk export (all envelopes, last N days)
+
+```bash
+# Epoch account (default profile)
+python3 ~/.claude/skills/docusign-skill/docusign_skill.py bulk-download --days 365 --output ~/Downloads/docusign-export/epoch
+
+# zergai account (second profile — see below)
+DOCUSIGN_PROFILE=zergai python3 ~/.claude/skills/docusign-skill/docusign_skill.py bulk-download --days 365 --output ~/Downloads/docusign-export/zergai
+```
+
+Per envelope it writes `<date>__<subject>__<id8>/combined.pdf` (all docs + certificate), `certificate_of_completion.pdf`, and `envelope.json` (status, signers, signed timestamps). A `manifest.json` at the root makes re-runs idempotent (`--force` to re-pull). `--separate` also saves each document individually. `--status completed` to restrict.
+
+## Multi-account (profiles)
+
+Set `DOCUSIGN_PROFILE=<name>` to use `credentials.<name>.json` + `private.<name>.key` instead of the defaults. Run `setup` and `consent` once per profile:
+
+```bash
+DOCUSIGN_PROFILE=zergai python3 docusign_skill.py setup --env prod
+DOCUSIGN_PROFILE=zergai python3 docusign_skill.py consent
+DOCUSIGN_PROFILE=zergai python3 docusign_skill.py whoami
+```
+
+Known accounts (2026-09): **epoch** = idan@epochml.com, account #189204260, na2 (paid). **zergai** = idan@zergai.com trial started 2025-09-12.
+
 ## Multi-account / accounts other than the JWT-impersonated user
 
 V1 supports a single configured impersonation user. If the user has multiple DocuSign accounts (e.g. multiple companies), the active one is set via `account_id` in `credentials.json` — edit to switch. Future: `--account` flag for inline switching.
@@ -166,8 +190,8 @@ V1 supports a single configured impersonation user. If the user has multiple Doc
 
 ## Files / where credentials live
 
-- `credentials.json` — integration key, user ID, account ID, env (`prod`/`demo`)
-- `private.key` — your RSA private key (chmod 600, gitignored)
+- `credentials.json` / `credentials.<profile>.json` — integration key, user ID, account ID, env (`prod`/`demo`)
+- `private.key` / `private.<profile>.key` — your RSA private key (chmod 600, gitignored)
 - `tokens/token_<user>.json` — short-lived access token cache
 
 ## Security

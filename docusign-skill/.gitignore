@@ -5,3 +5,6 @@ private.pem
 tokens/
 *.pyc
 __pycache__/
+credentials.*.json
+private.*.key
+*.bak
