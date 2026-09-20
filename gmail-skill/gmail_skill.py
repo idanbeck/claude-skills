@@ -40,6 +40,13 @@ import secrets
 # Email line width for readability (matches Superhuman style)
 EMAIL_LINE_WIDTH = 72
 
+# Homebrew Python is PEP 668 externally-managed, so the Google client libs live in a
+# sibling .venv rather than site-packages. Re-exec into it so the documented
+# `python3 gmail_skill.py ...` command keeps working regardless of how it was invoked.
+_VENV_PY = Path(__file__).parent / ".venv" / "bin" / "python3"
+if _VENV_PY.exists() and not sys.prefix.endswith(".venv"):
+    os.execv(str(_VENV_PY), [str(_VENV_PY), str(Path(__file__).resolve()), *sys.argv[1:]])
+
 # Check for required libraries
 try:
     from google.auth.transport.requests import Request
