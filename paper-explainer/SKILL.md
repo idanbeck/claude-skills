@@ -13,6 +13,7 @@ Every paper added to the knowledge base gets:
 Once a week there is also a **compendium**: all of the week's videos stitched together, plus one longer podcast episode covering the week.
 
 Tooling lives here: `~/.claude/skills/paper-explainer/`
+- `factcheck.workflow.js`: adversarial fact-check workflow (step 2.5)
 - `pe.py`: CLI (`tts`, `render`, `podcast`, `publish`, `week`, `stitch`)
 - `lib/narrated.py`: Manim base class `NarratedScene` + palette/helpers (`T`, `pill`, `title_card`, `bar_chart`)
 - `.venv/`: Manim Community 0.21 (system: ffmpeg, MacTeX, cairo/pango)
@@ -44,6 +45,19 @@ Read the PDF pages directly, not just the abstract: figures, the method diagram,
 - Keep claims exact. Anything that is the paper's own claim stays attributed to the paper; skeptical notes from the vault analysis can go in the final segment.
 
 Run `python3 ~/.claude/skills/paper-explainer/pe.py tts script.json --workdir .`. It caches by text hash, so editing one segment re-bills only that segment. It writes `durations.json`.
+
+### 2.5 Fact-check before spending on voice (required)
+Write the podcast `dialogue.json` (step 5) now too, then run the adversarial fact-check workflow over the vault note, `script.json` and `dialogue.json`:
+```
+Workflow({scriptPath: "~/.claude/skills/paper-explainer/factcheck.workflow.js", args: {
+  sources: ["<workdir>/page.txt or the PDF path"],
+  figures: ["<workdir>/figs/fig1.png", ...],          // extract figures: tables and charts hold numbers the text omits
+  quirks: "<any source self-contradictions you noticed>",
+  artifacts: [{key:"note", path:"<vault note>"}, {key:"script", path:"<workdir>/script.json"}, {key:"dialogue", path:"<workdir>/dialogue.json"}]}})
+```
+Each artifact gets two lenses (numbers, framing), and every reported issue goes to an independent refuter. Apply **every confirmed fix** to all three artifacts, save the result as `factcheck.json`, then run TTS. Why this is required: on Unslopping AI (2026-09-28) it confirmed 49 of 62 reported issues. They included invented specifics, causes the source hedges stated as settled, misattributed methodology, and an error in *our own* skeptical critique. Never trust a WebFetch summary for numbers: pull the raw text and figures (`curl` the HTML, download the PNGs, read them).
+
+For blog posts (no arXiv PDF), archive a PDF for the vault/scholar with `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-pdf-header-footer --print-to-pdf="<vault>/Reading/pdfs/<title>.pdf" <url>`.
 
 ### 3. Write `scene.py` (Manim)
 ```python
@@ -102,6 +116,8 @@ Triggered by launchd every Sunday 09:00 (`weekly.sh`), or on request.
 
 ## Gotchas
 - This ffmpeg build has no libass, so captions are soft (mov_text CC track) plus a sidecar `.srt`, not burned in.
+- In one `self.play`, never combine `FadeIn(group)` with `Indicate(submobject)`: Indicate restores the pre-fade state and the element vanishes. Play them sequentially.
+- Never pass an empty string to `T("")` (empty Text breaks layout math).
 - Segment ids must be `s01`…`sNN`; the scene classes must be `S01`…`SNN`.
 - Titles containing `:` break the zergscholar PDF auto-match and the vault filename. Use ` - ` in the vault title and pass `--pdf` explicitly to push-paper.
 - The final mp4 is roughly 3 MB per minute. The vault is in iCloud, so keep renders in `~/paper-videos/`.
