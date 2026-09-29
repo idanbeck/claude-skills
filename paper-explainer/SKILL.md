@@ -69,7 +69,7 @@ class S01(NarratedScene):        # class name == segment id, uppercased
         ...
 ```
 - `NarratedScene` pads each scene to its narration length, so audio sync is automatic. Use `self.until(frac)` to land visual beats on the words (read `durations.json` and the narration to choose fractions).
-- Palette: `BG FG MUTED BLUE TEAL YELLOW RED GREEN PURPLE`. Text via `T(text, size, color)`. `MathTex` works (MacTeX installed). Helpers: `pill`, `title_card`, `bar_chart(values, labels, colors, max_value, fmt)`.
+- Palette: `BG FG MUTED BLUE TEAL YELLOW RED GREEN PURPLE`. Text via `T(text, size, color)`. `MathTex` works (MacTeX installed). Helpers: `pill`, `title_card`, `bar_chart(values, labels, colors, max_value, fmt)` (vertical), `hbar_rows([(name, value, color)], maxv)` (horizontal, common bar start; returns rows as `[name, bar, value]`).
 - Visual grammar: build up incrementally, never show a finished slide; one focal element at a time; recreate the paper's key figure as an animated chart with real numbers; show equations only when the narration explains them; move or fade old elements before adding new ones; keep 0.3–0.5 margins from the frame edge.
 - When bars start near the same value, truncate the axis and label it "axes truncated".
 

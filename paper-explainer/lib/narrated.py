@@ -95,3 +95,20 @@ def bar_chart(values, labels, colors=None, max_value=None, height=3.5, width=0.7
         lab_t = T(lab, size=18, color=MUTED).next_to(b, DOWN, buff=0.15)
         cols.append(VGroup(b, val, lab_t))
     return VGroup(*cols), list(bars)
+
+
+def hbar_rows(rows, maxv, W=6.0, h=0.42, name_size=20, fmt="{:.1f}"):
+    """Horizontal labeled bars [(name, value, color), ...] with a common bar start. Returns a centered VGroup of rows."""
+    import numpy as _np
+    items = VGroup()
+    for n, v, c in rows:
+        items.add(VGroup(T(n, size=name_size, color=FG),
+                         Rectangle(width=max(0.02, W * v / maxv), height=h, stroke_width=0, fill_color=c, fill_opacity=0.9),
+                         T(fmt.format(v), size=name_size, color=c)))
+    nw = max(it[0].width for it in items)
+    for i, it in enumerate(items):
+        y = -i * (h + 0.22)
+        it[0].move_to(_np.array([0, y, 0]), aligned_edge=LEFT)
+        it[1].move_to(_np.array([nw + 0.25, y, 0]), aligned_edge=LEFT)
+        it[2].next_to(it[1], RIGHT, buff=0.12)
+    return VGroup(*items).move_to(ORIGIN)
