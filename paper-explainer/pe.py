@@ -170,9 +170,12 @@ def cmd_render(a):
     parts = []
     for s in segs:
         cls = s["id"].upper()
-        vids = sorted(media.glob(f"videos/{scene.stem}/*/{cls}.mp4"), key=lambda p: p.stat().st_mtime)
+        # Only the requested quality's folder: picking the newest file across folders spliced stale 480p drafts
+        # into finals (a draft --only after a final made the draft newest).
+        qdir = {"l": "480p15", "m": "720p30", "h": "1080p30"}[a.quality]
+        vids = sorted(media.glob(f"videos/{scene.stem}/{qdir}/{cls}.mp4"), key=lambda p: p.stat().st_mtime)
         if not vids:
-            die(f"no rendered video for {cls}")
+            die(f"no {qdir} render for {cls}: re-render it at this quality (no fallback to other qualities)")
         muxed = seg_dir / f"{s['id']}.mp4"
         run(["ffmpeg", "-y", "-i", str(vids[-1]), "-i", str(work / "audio" / f"{s['id']}.mp3"),
              "-filter_complex", "[1:a]apad[a]", "-map", "0:v", "-map", "[a]",
@@ -190,8 +193,15 @@ def cmd_render(a):
     run(["ffmpeg", "-y", "-i", str(joined), "-i", str(srt), "-map", "0", "-map", "1",
          "-c", "copy", "-c:s", "mov_text", "-metadata:s:s:0", "language=eng",
          "-movflags", "+faststart", str(final)])
+    aligned = False
+    if a.quality == "h" and (SKILL / "tools" / "captions.py").exists():
+        # audio-aligned, written-form captions (tools/captions.py), remuxed into final.mp4
+        r = subprocess.run([sys.executable, str(SKILL / "tools" / "captions.py"), str(work)], capture_output=True, text=True)
+        aligned = r.returncode == 0
+        if not aligned:
+            print(r.stderr[-1500:], file=sys.stderr)
     print(json.dumps({"ok": True, "final": str(final), "seconds": round(duration(final), 1),
-                      "mb": round(final.stat().st_size / 1e6, 1), "captions": str(srt)}))
+                      "mb": round(final.stat().st_size / 1e6, 1), "captions": str(srt), "captions_aligned": aligned}))
 
 
 # ---------------------------------------------------------------- podcast
@@ -238,7 +248,9 @@ def cmd_publish(a):
                       (Path(a.podcast) if a.podcast else None, f"{title} - Podcast.mp3"),
                       (Path(a.scene) if a.scene else None, "scene.py"),
                       (Path(a.script), "script.json"),
-                      (Path(a.dialogue) if a.dialogue else None, "dialogue.json")]:
+                      (Path(a.dialogue) if a.dialogue else None, "dialogue.json"),
+                      (work / "factcheck.json", "factcheck.json"), (work / "lexicon.json", "lexicon.json"),
+                      (work / "tts_script.json", "tts_script.json")]:
         if src and src.exists():
             shutil.copy2(src, dest / name)
             files[name] = str(dest / name)
@@ -289,12 +301,13 @@ tags: paper-video
 # ---------------------------------------------------------------- weekly helpers
 def cmd_week(a):
     since = dt.date.today() - dt.timedelta(days=a.days)
-    items = []
+    latest = {}
     if QUEUE.exists():
         for ln in QUEUE.read_text().splitlines():
             e = json.loads(ln)
             if dt.date.fromisoformat(e["date"]) >= since:
-                items.append(e)
+                latest[e["title"]] = e          # re-publishing a paper appends again; keep one entry per title
+    items = sorted(latest.values(), key=lambda e: e["date"])
     iso = dt.date.today().isocalendar()
     print(json.dumps({"ok": True, "week": f"{iso[0]}-W{iso[1]:02d}", "since": since.isoformat(),
                       "items": items}, indent=2))

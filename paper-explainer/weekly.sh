@@ -8,5 +8,5 @@ COUNT=$(python3 ~/.claude/skills/paper-explainer/pe.py week | python3 -c "import
 echo "$(date) papers this week: $COUNT" >> $LOG
 [ "$COUNT" = "0" ] && exit 0
 /Users/idanbeck/.local/bin/claude -p --dangerously-skip-permissions \
-  "Use the paper-explainer skill to build this week's paper compendium (stitched video + weekly podcast episode + weekly vault note), then DM Idan on Slack with the vault note path and a 3-line summary of the threads across this week's papers." \
+  "Use the paper-explainer skill and follow its Weekly compendium section exactly: build the compendium with tools/compendium.py (Downloads folder + vault copy), write and fact-check the weekly dialogue before any TTS, render the weekly podcast, write the weekly vault note, then DM Idan on Slack with the Downloads folder path, the plain link list from Links.md, and a 3-line summary of the threads across this week's papers. Never print config files, tokens or environment variables." \
   >> $LOG 2>&1

@@ -124,12 +124,16 @@ Send the mp4 (and podcast mp3) to Idan with SendUserFile when it's available, an
 
 ## Weekly compendium
 
-Triggered by launchd every Sunday 09:00 (`weekly.sh`), or on request. For a shareable compendium (e.g. to post on X), use `~/paper-videos/weekly-2026-W40/` as the template: `intro.py` (a title card listing the papers) plus `build.py`. The build re-encodes each video to 1080p30, concatenates them, merges the SRTs with time offsets, embeds chapter markers, copies the individual videos, and writes `Links.md` with chapter timestamps and paper links. Output goes to `~/Downloads/Paper-Explainers-<YYYY-Www>/`.
-1. Run `pe.py week` to get this week's papers from the queue. If there are none, stop.
-2. Run `pe.py stitch <each week's mp4> --workdir ~/paper-videos/weekly-<YYYY-Www> --out "<vault>/Reading/Videos/Weekly/<YYYY-Www> - Paper Compendium.mp4"`.
-3. Write `weekly-dialogue.json`: one episode, 12–20 min, covering every paper this week. Draw on the vault notes' "My Thoughts" and look for **connections across the papers**, which is the main value over the individual episodes. Render it with `pe.py podcast`.
-4. Write `Reading/Videos/Weekly/<YYYY-Www> - Paper Compendium.md`: embed the stitched video and the episode, list each paper with links to its paper note and video note, and add a short "threads this week" section.
-5. Notify Idan (Slack DM via slack-skill if running headless; otherwise SendUserFile).
+Triggered by launchd every Sunday 09:00 (`weekly.sh`), or on request ("compile this week's videos").
+1. Run `pe.py week` to get this week's papers from the queue (one entry per title). If there are none, stop.
+2. Build the shareable compendium:
+   ```bash
+   python3 ~/.claude/skills/paper-explainer/tools/compendium.py [--days 7]
+   ```
+   It renders an intro card listing the papers, re-encodes and concatenates the videos (1080p30), merges their captions with time offsets, and embeds chapter markers. It also copies the individual videos and writes `Links.md`, with chapter timestamps and the links from each paper note's `**Source:**` line. Output goes to `~/Downloads/Paper-Explainers-<YYYY-Www>/`, plus `Reading/Videos/Weekly/<YYYY-Www> - Paper Compendium.{mp4,srt}` for the vault. This is what Idan posts to X.
+3. Write `weekly-dialogue.json`: one episode covering every paper this week. Draw on the vault notes' "My Thoughts" and look for **connections across the papers**, which is the main value over the individual episodes. Scale the length to the week: about 4 min per paper plus about 5 min of connections, capped at 20 min, and don't pad. **Fact-check it** with `factcheck.workflow.js` (artifact: the weekly dialogue; sources: each paper's `paper.txt` and vault note) before any TTS. Then render it with `pe.py podcast` and run `tools/audiocheck.py <workdir> --podcast`.
+4. Write `Reading/Videos/Weekly/<YYYY-Www> - Paper Compendium.md`: embed the compendium video and the episode, list each paper with links to its paper note and video note, and add a short "threads this week" section.
+5. Notify Idan with the Downloads folder path and `Links.md`: by Slack DM via slack-skill if running headless, otherwise in chat. Never print a skill's `config.json` or environment variables while doing this; a headless run once leaked Slack tokens into the log that way.
 
 ## Voices
 `narrator` = George (warm storyteller), `host` = Alice (clear educator), `guest` = Brian (deep, resonant). Any ElevenLabs voice id also works. Idan's own professional clone (`2OfNNDdqoRdl5K0o1XYw`) is available but **only use it if he asks**.
