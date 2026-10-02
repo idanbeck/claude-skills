@@ -18,7 +18,8 @@ Tooling lives here: `~/.claude/skills/paper-explainer/`
 - `lib/narrated.py`: Manim base class `NarratedScene` + palette/helpers (`T`, `fit`, `pill`, `title_card`, `bar_chart`, `hbar_rows`)
 - `tools/tts_prep.py`: written-form `script.json` + `lexicon.json` → spoken-form `tts_script.json` (step 2)
 - `tools/audiocheck.py`: whisper transcription of the narration/podcast audio, diffing spoken numbers against the text (step 2.6)
-- `tools/captions.py`: captions in written form, timed to pauses in the audio, remuxed into `final.mp4` (step 4)
+- `tools/captions.py`: captions in written form, timed to pauses in the audio, remuxed into `final.mp4` (runs automatically on `render --quality h`)
+- `tools/compendium.py`: weekly shareable compendium (intro card, chapters, merged captions, `Links.md`) in `~/Downloads/Paper-Explainers-<week>/`
 - `.venv/`: Manim Community 0.21 (system: ffmpeg, MacTeX, cairo/pango)
 - `weekly.sh` + launchd `com.idanbeck.paper-explainer-weekly`: Sunday 09:00 compendium
 
@@ -99,10 +100,7 @@ ffmpeg -y -v error -pattern_type glob -i 'qa/s*.png' -filter_complex "scale=640:
 ```
 Also build a mid-frame sheet (at 50% of each segment), because end frames miss elements that fade out. Check for overlaps, text running off the frame, labels inside shaded regions, misaligned baselines, and reference lines drawn at the wrong height. Fix, then re-render only what changed with `--only s02,s09`. Tip: write `scene.py` while the fact-check runs, and smoke-render it against estimated durations (`words / 2.6` into `smoke/durations.json`).
 
-When it's clean, **delete `media/videos/scene/480p15` first**: `pe.py render` picks each scene's newest mp4 across all quality folders, so a stale draft can splice into the final. Then run the final pass with `--quality h` (1080p30, about 1 min of render per 6 min of video). Then align the captions:
-```bash
-python3 ~/.claude/skills/paper-explainer/tools/captions.py .     # written-form cues timed to audio pauses, remuxed into final.mp4
-```
+When it's clean, run the final pass with `--quality h` (1080p30, about 1 min of render per 6 min of video). `pe.py render` uses only the folder for the requested quality and stops with an error if a scene is missing there, so a stale 480p draft can't end up in the final. The `--quality h` pass also runs `tools/captions.py` automatically (written-form cues timed to audio pauses, remuxed into `final.mp4`) and prints `captions_aligned: true`. If you edit captions by hand, rerun it with `python3 ~/.claude/skills/paper-explainer/tools/captions.py .`
 
 ### 5. Podcast `dialogue.json`
 ```json
