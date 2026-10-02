@@ -62,7 +62,25 @@ class NarratedScene(Scene):
 
 
 def T(text, size=36, color=FG, weight=NORMAL, **kw):
-    return Text(text, font=FONT, font_size=size, color=color, weight=weight, **kw)
+    """Text laid out at >= 48 pt, then scaled down to `size`.
+
+    Pango hints glyph advances at small font sizes, which unevens letter and word spacing ("co ntext",
+    "p er") even in a 1080p render. Laying out at 48 pt and scaling renders cleanly (fix from the CVW kit)."""
+    base = max(size, 48)
+    t = Text(text, font=FONT, font_size=base, color=color, weight=weight, **kw)
+    return t.scale(size / base) if base != size else t
+
+
+SAFE_X, SAFE_Y = 6.6, 3.45
+
+
+def fit(m, max_w=2 * SAFE_X, max_h=2 * SAFE_Y):
+    """Scale a mobject down (never up) so it fits within max_w x max_h (default: the safe area)."""
+    if m.width > max_w:
+        m.scale_to_fit_width(max_w)
+    if m.height > max_h:
+        m.scale_to_fit_height(max_h)
+    return m
 
 
 def pill(label, color=TEAL, size=26, pad=0.22, fill=0.12):
