@@ -227,6 +227,28 @@ aws_skill.py cost report --customer dmatrix --days 30
 
 Returns total + per-AWS-service breakdown + last-6-months trend, all filtered to the `Customer` tag.
 
+### Cold archive (offload local folders to S3)
+
+`cold_archive.py` moves idle local folders to `s3://epoch-cold-archive-836951909127-us-west-2` as verified `tar.zst` objects (GLACIER_IR) and restores them byte-identically.
+
+```bash
+python3 ~/.claude/skills/aws-skill/cold_archive.py archive plan.json     # JSON list of absolute folder paths
+python3 ~/.claude/skills/aws-skill/cold_archive.py restore /abs/original/path [--dest DIR]
+python3 ~/.claude/skills/aws-skill/cold_archive.py status
+python3 ~/.claude/skills/aws-skill/cold_archive.py catalog-md            # regenerate the vault catalog page
+```
+
+For each folder:
+1. Write a manifest with every file's SHA-256.
+2. Stream `tar | zstd | aws s3 cp -`, with no local temp copy, so it works on a nearly full disk.
+3. Re-download the object and check its SHA-256 plus every member against the manifest.
+4. Re-check the source is unchanged and nothing has it open, then delete it locally.
+5. Append a row to the catalog (S3 `catalog/catalog.jsonl`, `~/zerg-embedded/corsair/runs/maintenance/cold-archive/catalog.jsonl`, and the vault page `Epoch/Engineering/Storage/Cold Archive Catalog.md`).
+
+It refuses folders written within the last 7 days and waits while free space is below `COLD_ARCHIVE_MIN_FREE_GIB` (default 20). Re-runs resume and skip folders already in the catalog.
+
+Policy, eligibility rules and history are in the vault at `Epoch/Engineering/Storage/Storage and Archive.md`. Never delete corsair or CAO run data that isn't archived. Receipts hash it, and `runs/retained/` holds the only copies of hardware evidence.
+
 ## Terraform integration
 
 Render an intent op as a stand-alone Terraform module instead of executing it via boto3:
