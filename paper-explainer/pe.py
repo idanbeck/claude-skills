@@ -298,12 +298,27 @@ tags: paper-video
     print(json.dumps({"ok": True, "note": str(note), "files": files}))
 
 
+def read_icloud(path, tries=6):
+    """Read a vault file that iCloud may have offloaded. A dataless file raises EDEADLK ("Resource deadlock
+    avoided") until it is downloaded, which broke the 2026-10-04 Sunday run, so request the download and retry."""
+    import errno
+    import time
+    for i in range(tries):
+        try:
+            return Path(path).read_text()
+        except OSError as e:
+            if e.errno != errno.EDEADLK or i == tries - 1:
+                raise
+            subprocess.run(["brctl", "download", str(path)], capture_output=True)
+            time.sleep(2 * (i + 1))
+
+
 # ---------------------------------------------------------------- weekly helpers
 def cmd_week(a):
     since = dt.date.today() - dt.timedelta(days=a.days)
     latest = {}
     if QUEUE.exists():
-        for ln in QUEUE.read_text().splitlines():
+        for ln in read_icloud(QUEUE).splitlines():
             e = json.loads(ln)
             if dt.date.fromisoformat(e["date"]) >= since:
                 latest[e["title"]] = e          # re-publishing a paper appends again; keep one entry per title

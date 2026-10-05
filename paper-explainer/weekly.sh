@@ -4,7 +4,9 @@ export PATH="/opt/homebrew/bin:/Library/TeX/texbin:/Users/idanbeck/.local/bin:/u
 LOG=~/paper-videos/weekly.log
 mkdir -p ~/paper-videos
 cd "/Users/idanbeck/Library/Mobile Documents/iCloud~md~obsidian/Documents/idanbeck" || exit 1
-COUNT=$(python3 ~/.claude/skills/paper-explainer/pe.py week | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))")
+COUNT=$(python3 ~/.claude/skills/paper-explainer/pe.py week 2>>$LOG | python3 -c "import json,sys;print(len(json.load(sys.stdin)['items']))" 2>>$LOG)
+# An empty COUNT means the queue could not be read (pe.py already retries iCloud offloading). Proceed anyway and let
+# the agent re-check, rather than silently skipping the week.
 echo "$(date) papers this week: $COUNT" >> $LOG
 [ "$COUNT" = "0" ] && exit 0
 /Users/idanbeck/.local/bin/claude -p --dangerously-skip-permissions \

@@ -17,9 +17,12 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SKILL))
+from pe import read_icloud  # noqa: E402  (retries iCloud-offloaded vault files)
 VAULT = Path.home() / "Library/Mobile Documents/iCloud~md~obsidian/Documents/idanbeck"
 QUEUE = VAULT / "Reading/Videos/_queue.jsonl"
 VENV_MANIM = SKILL / ".venv/bin/manim"
@@ -104,7 +107,7 @@ a = ap.parse_args()
 today = dt.date.today()
 since = today - dt.timedelta(days=a.days)
 latest = {}
-for ln in QUEUE.read_text().splitlines():
+for ln in read_icloud(QUEUE).splitlines():
     e = json.loads(ln)
     if dt.date.fromisoformat(e["date"]) >= since:
         latest[e["title"]] = e
