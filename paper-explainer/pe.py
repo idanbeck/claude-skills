@@ -211,12 +211,18 @@ def cmd_podcast(a):
     (work / "pod").mkdir(parents=True, exist_ok=True)
     voices = {k: resolve_voice(v) for k, v in dia.get("voices", {"A": "host", "B": "guest"}).items()}
     lines = dia["lines"]
+    say = lambda t: t                          # noqa: E731
+    if a.lexicon:                              # voice the spoken form (workdir lexicon.json + shared defaults);
+        sys.path.insert(0, str(SKILL / "tools"))  # dialogue.json stays written-form for the transcript
+        from tts_prep import rules, spoken
+        rs = rules(work)
+        say = lambda t: spoken(t, rs)          # noqa: E731
     files, chars = [], 0
     for i, ln in enumerate(lines):
         out = work / "pod" / f"{i:03}.mp3"
-        prev = next((l["text"] for l in reversed(lines[:i]) if l["speaker"] == ln["speaker"]), None)
-        if cached_tts(ln["text"], voices[ln["speaker"]], out, prev_text=prev):
-            chars += len(ln["text"])
+        prev = next((say(l["text"]) for l in reversed(lines[:i]) if l["speaker"] == ln["speaker"]), None)
+        if cached_tts(say(ln["text"]), voices[ln["speaker"]], out, prev_text=prev):
+            chars += len(say(ln["text"]))
         files.append(out)
     gap = work / "pod" / "gap.mp3"
     run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.28",
@@ -353,6 +359,7 @@ def main():
     r.add_argument("--only", help="comma-separated segment ids to (re)render")
     po = sp.add_parser("podcast"); po.add_argument("dialogue"); po.add_argument("--workdir", required=True)
     po.add_argument("--out", required=True)
+    po.add_argument("--lexicon", action="store_true", help="voice lines through lexicon.json + shared defaults (tts_prep)")
     pu = sp.add_parser("publish"); pu.add_argument("script"); pu.add_argument("--workdir", required=True)
     pu.add_argument("--title"); pu.add_argument("--paper-note"); pu.add_argument("--podcast")
     pu.add_argument("--scene"); pu.add_argument("--dialogue")

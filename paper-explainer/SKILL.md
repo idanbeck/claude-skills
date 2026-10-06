@@ -107,7 +107,7 @@ When it's clean, run the final pass with `--quality h` (1080p30, about 1 min of 
 {"title": "Paper Explainer — <title>", "voices": {"A": "host", "B": "guest"},
  "lines": [{"speaker": "A", "text": "..."}, {"speaker": "B", "text": "..."}]}
 ```
-About 900–1,100 words, 25–35 lines. A (Alice, curious host) asks the questions a smart outsider would ask; B (Brian) explains with concrete examples. Cover the same arc as the video, but talk it through; don't read the video script aloud. End with "what would you take from this if you were building X tomorrow." Then run `pe.py podcast dialogue.json --workdir . --out <slug>-podcast.mp3`.
+About 900–1,100 words, 25–35 lines. A (Alice, curious host) asks the questions a smart outsider would ask; B (Brian) explains with concrete examples. Cover the same arc as the video, but talk it through; don't read the video script aloud. End with "what would you take from this if you were building X tomorrow." Then run `pe.py podcast dialogue.json --workdir . --out <slug>-podcast.mp3 --lexicon`. `--lexicon` voices each line through `lexicon.json` and the shared defaults (the same rules as the narration), so `dialogue.json` stays in written form for the transcript; without it, names and decimals must be spelled out by hand.
 
 ### 6. Publish
 ```bash
