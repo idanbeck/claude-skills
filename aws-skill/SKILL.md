@@ -245,7 +245,7 @@ For each folder:
 4. Re-check the source is unchanged and nothing has it open, then delete it locally.
 5. Append a row to the catalog (S3 `catalog/catalog.jsonl`, `~/zerg-embedded/corsair/runs/maintenance/cold-archive/catalog.jsonl`, and the vault page `Epoch/Engineering/Storage/Cold Archive Catalog.md`).
 
-It refuses folders written within the last 7 days and waits while free space is below `COLD_ARCHIVE_MIN_FREE_GIB` (default 20). Re-runs resume and skip folders already in the catalog.
+It refuses folders written within the idle window (`COLD_ARCHIVE_IDLE_DAYS`, default 7) and waits while free space is below `COLD_ARCHIVE_MIN_FREE_GIB` (default 20). Re-runs resume and skip folders already in the catalog. Folders outside `~` (e.g. idle `/private/tmp` agent workspaces) are stored under `<host>/_abs/<absolute path>`. Launch long runs with `taskpolicy -b` so manifest hashing doesn't compete with agents for disk I/O.
 
 Policy, eligibility rules and history are in the vault at `Epoch/Engineering/Storage/Storage and Archive.md`. Never delete corsair or CAO run data that isn't archived. Receipts hash it, and `runs/retained/` holds the only copies of hardware evidence.
 

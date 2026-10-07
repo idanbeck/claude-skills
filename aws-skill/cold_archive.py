@@ -24,7 +24,7 @@ CATALOG = os.environ.get("COLD_ARCHIVE_CATALOG", os.path.join(HOME, "zerg-embedd
 TMP = os.path.join(HOME, ".cache/cold-archive/tmp")
 ZSTD = ["zstd", "-q", "-T0", "-12", "--long=27"]
 MIN_FREE = int(float(os.environ.get("COLD_ARCHIVE_MIN_FREE_GIB", "20")) * 2**30)
-IDLE_SECONDS = 7 * 86400
+IDLE_SECONDS = float(os.environ.get("COLD_ARCHIVE_IDLE_DAYS", "7")) * 86400
 ENV = dict(os.environ, AWS_PROFILE=os.environ.get("AWS_PROFILE", "epoch"),
            AWS_REGION=os.environ.get("AWS_REGION", "us-west-2"))
 
@@ -41,8 +41,17 @@ def sha256_file(p):
     return h.hexdigest()
 
 
+def under_home(p):
+    return p == HOME or p.startswith(HOME + "/")
+
+
+def display(p):
+    return "~/" + os.path.relpath(p, HOME) if under_home(p) else p
+
+
 def s3_key(src):
-    rel = os.path.relpath(src, HOME)
+    # paths outside ~ (e.g. /private/tmp) live under _abs/ so keys never contain ".."
+    rel = os.path.relpath(src, HOME) if under_home(src) else "_abs" + src
     return f"{HOST}/{rel}"
 
 
@@ -325,7 +334,7 @@ def cmd_archive(plan_path):
         try:
             row = ship(src, m)
             freed += m["logical_bytes"]
-            log(f"ARCHIVED {os.path.relpath(src, HOME)}  {m['logical_bytes']/2**30:.1f} GiB -> "
+            log(f"ARCHIVED {display(src)}  {m['logical_bytes']/2**30:.1f} GiB -> "
                 f"{m['archive_bytes']/2**30:.2f} GiB  free {shutil.disk_usage(HOME).free/2**30:.0f} GiB")
         except Exception as e:
             failures.append({"source": src, "stage": "ship", "error": str(e)[:300]})
@@ -369,8 +378,8 @@ def cmd_catalog_md(out):
     ab = sum(r["archive_bytes"] for r in rows)
     by_root = {}
     for r in rows:
-        rel = os.path.relpath(r["source"], HOME).split("/")
-        k = "/".join(rel[:4]) if rel[:3] == ["zerg-embedded", "corsair", "runs"] else "/".join(rel[:2])
+        rel = display(r["source"]).split("/")
+        k = "/".join(rel[:5]) if rel[:4] == ["~", "zerg-embedded", "corsair", "runs"] else "/".join(rel[:3])
         a = by_root.setdefault(k, [0, 0, 0])
         a[0] += 1; a[1] += r["logical_bytes"]; a[2] += r["archive_bytes"]
     lines = ["# Cold Archive Catalog", "",
@@ -383,11 +392,11 @@ def cmd_catalog_md(out):
              "```bash", "python3 ~/.claude/skills/aws-skill/cold_archive.py restore /absolute/original/path", "```",
              "", "## By area", "", "| Area | Folders | Original GiB | Stored GiB |", "|---|---:|---:|---:|"]
     for k, v in sorted(by_root.items(), key=lambda kv: -kv[1][1]):
-        lines.append(f"| `~/{k}` | {v[0]} | {v[1]/2**30:,.1f} | {v[2]/2**30:,.2f} |")
+        lines.append(f"| `{k}` | {v[0]} | {v[1]/2**30:,.1f} | {v[2]/2**30:,.2f} |")
     lines += ["", "## Folders", "", "| Original path | Files | Original GiB | Stored GiB | Last write | Archived |",
               "|---|---:|---:|---:|---|---|"]
     for r in sorted(rows, key=lambda r: r["source"]):
-        lines.append(f"| `~/{os.path.relpath(r['source'], HOME)}` | {r['files']:,} | {r['logical_bytes']/2**30:,.2f} | "
+        lines.append(f"| `{display(r['source'])}` | {r['files']:,} | {r['logical_bytes']/2**30:,.2f} | "
                      f"{r['archive_bytes']/2**30:,.2f} | {r['newest_mtime'][:10]} | {r['archived_at'][:10]} |")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     open(out, "w").write("\n".join(lines) + "\n")
