@@ -147,6 +147,17 @@ All label commands support multiple IDs (comma-separated):
 python3 ~/.claude/skills/gmail-skill/gmail_skill.py star "id1,id2,id3" --account user@gmail.com
 ```
 
+### Message format (Superhuman-compatible)
+
+`send` and `draft` build multipart/alternative messages (plain text + simple HTML paragraphs, **no hard line wraps**, proper-case headers). Drafts created this way appear and edit cleanly in Superhuman, including threaded replies and attachments (tested 2026-10-08 with three canary drafts).
+
+Extra options for both `send` and `draft`:
+- `--body-file PATH`: read the body from a file (avoids shell quoting for long emails)
+- `--attach PATH`: attach a file (repeatable)
+- `--reply-to-id MESSAGE_ID`: thread the message as a reply (sets In-Reply-To/References and threadId). Available on `send` as well as `draft`.
+
+Recommended outreach flow: create drafts in the right account and thread, the user reviews and sends from Superhuman, and only use `send` after explicit per-email confirmation.
+
 ### Create Draft
 
 Creates a draft email. Use `--reply-to-id` when replying to an existing email to ensure proper threading in email clients like Superhuman.

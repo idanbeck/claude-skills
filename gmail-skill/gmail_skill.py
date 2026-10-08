@@ -572,22 +572,64 @@ def wrap_email_body(body: str, width: int = EMAIL_LINE_WIDTH) -> str:
     return '\n\n'.join(wrapped_paragraphs)
 
 
-def create_message(to: str, subject: str, body: str, cc: str = None, bcc: str = None) -> dict:
-    """Create a message for sending.
+def _body_to_html(body: str) -> str:
+    """Render plain paragraphs as simple HTML, the way mail clients compose (no hard wraps)."""
+    import html as _html
+    parts = []
+    for para in body.split("\n\n"):
+        parts.append("<div>" + _html.escape(para).replace("\n", "<br>") + "</div>")
+    return '<div dir="ltr">' + "<div><br></div>".join(parts) + "</div>"
 
-    Returns a dict with 'raw' key containing base64url encoded email.
-    """
-    wrapped_body = wrap_email_body(body)
-    message = MIMEText(wrapped_body)
-    message['to'] = to
-    message['subject'] = subject
+
+def build_mime(to: str, subject: str, body: str, cc: str = None, bcc: str = None,
+               in_reply_to: str = None, references: str = None,
+               attachments: list = None, from_addr: str = None) -> dict:
+    """Build a Gmail API message: multipart/alternative (plain + HTML, no hard wraps),
+    proper-case headers, optional threading headers and file attachments.
+    Superhuman and Gmail both render this like a draft composed in a mail client."""
+    import mimetypes
+    from email.mime.base import MIMEBase
+    from email import encoders
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(body, "plain", "utf-8"))
+    alt.attach(MIMEText(_body_to_html(body), "html", "utf-8"))
+    if attachments:
+        msg = MIMEMultipart("mixed")
+        msg.attach(alt)
+        for path in attachments:
+            path = os.path.expanduser(path)
+            ctype, encoding = mimetypes.guess_type(path)
+            if ctype is None or encoding is not None:
+                ctype = "application/octet-stream"
+            maintype, subtype = ctype.split("/", 1)
+            with open(path, "rb") as f:
+                part = MIMEBase(maintype, subtype)
+                part.set_payload(f.read())
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", "attachment", filename=os.path.basename(path))
+            msg.attach(part)
+    else:
+        msg = alt
+    if from_addr:
+        msg["From"] = from_addr
+    msg["To"] = to
     if cc:
-        message['cc'] = cc
+        msg["Cc"] = cc
     if bcc:
-        message['bcc'] = bcc
+        msg["Bcc"] = bcc
+    msg["Subject"] = subject
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+    return {"raw": raw}
 
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-    return {'raw': raw}
+
+def create_message(to: str, subject: str, body: str, cc: str = None, bcc: str = None,
+                   attachments: list = None, from_addr: str = None) -> dict:
+    """Create a message for sending (multipart plain+HTML, no hard wraps)."""
+    return build_mime(to, subject, body, cc=cc, bcc=bcc, attachments=attachments, from_addr=from_addr)
 
 
 # ============ Commands ============
@@ -814,13 +856,22 @@ def cmd_send(args):
     service = get_gmail_service(args.account)
 
     try:
-        message = create_message(
+        thread_id = None
+        in_reply_to = references = None
+        if getattr(args, "reply_to_id", None):
+            thread_id, in_reply_to, references = _reply_headers(service, args.reply_to_id)
+        message = build_mime(
             to=args.to,
             subject=args.subject,
-            body=args.body,
+            body=_resolve_body(args),
             cc=args.cc,
             bcc=args.bcc,
+            in_reply_to=in_reply_to,
+            references=references,
+            attachments=getattr(args, "attach", None),
         )
+        if thread_id:
+            message["threadId"] = thread_id
 
         result = service.users().messages().send(
             userId="me",
@@ -1003,23 +1054,32 @@ def cmd_unstar(args):
     }, indent=2))
 
 
-def create_reply_message(to: str, subject: str, body: str, in_reply_to: str = None, references: str = None, cc: str = None, bcc: str = None) -> dict:
-    """Create a reply message with proper threading headers."""
-    wrapped_body = wrap_email_body(body)
-    message = MIMEText(wrapped_body)
-    message['to'] = to
-    message['subject'] = subject
-    if cc:
-        message['cc'] = cc
-    if bcc:
-        message['bcc'] = bcc
-    if in_reply_to:
-        message['In-Reply-To'] = in_reply_to
-    if references:
-        message['References'] = references
+def create_reply_message(to: str, subject: str, body: str, in_reply_to: str = None, references: str = None,
+                         cc: str = None, bcc: str = None, attachments: list = None, from_addr: str = None) -> dict:
+    """Create a reply message with proper threading headers (multipart plain+HTML, no hard wraps)."""
+    return build_mime(to, subject, body, cc=cc, bcc=bcc, in_reply_to=in_reply_to, references=references,
+                      attachments=attachments, from_addr=from_addr)
 
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-    return {'raw': raw}
+
+def _resolve_body(args):
+    """--body-file wins over --body; returns the body text."""
+    bf = getattr(args, "body_file", None)
+    if bf:
+        with open(os.path.expanduser(bf)) as f:
+            return f.read().strip("\n")
+    return args.body
+
+
+def _reply_headers(service, reply_to_id):
+    """Return (thread_id, in_reply_to, references) for replying to a message."""
+    original = service.users().messages().get(
+        userId="me", id=reply_to_id, format="metadata",
+        metadataHeaders=["Message-ID", "Message-Id", "References"]).execute()
+    headers = {h["name"].lower(): h["value"] for h in original.get("payload", {}).get("headers", [])}
+    mid = headers.get("message-id")
+    refs = headers.get("references", "")
+    references = f"{refs} {mid}".strip() if mid else (refs or None)
+    return original.get("threadId"), mid, references
 
 
 def cmd_draft(args):
@@ -1044,47 +1104,18 @@ def cmd_draft(args):
 
         # If replying to a message, get its headers and thread for proper threading
         if args.reply_to_id:
-            original = service.users().messages().get(
-                userId="me",
-                id=args.reply_to_id,
-                format="metadata",
-                metadataHeaders=["Message-ID", "References"]
-            ).execute()
+            thread_id, in_reply_to, references = _reply_headers(service, args.reply_to_id)
 
-            # Get thread ID from original message
-            thread_id = original.get('threadId')
-
-            headers = {h['name']: h['value'] for h in original.get('payload', {}).get('headers', [])}
-            original_message_id = headers.get('Message-ID', headers.get('Message-Id'))
-            original_references = headers.get('References', '')
-
-            if original_message_id:
-                in_reply_to = original_message_id
-                # References should include the original references plus the message we're replying to
-                if original_references:
-                    references = f"{original_references} {original_message_id}"
-                else:
-                    references = original_message_id
-
-        # Create message with reply headers if available
-        if in_reply_to:
-            message = create_reply_message(
-                to=args.to,
-                subject=args.subject,
-                body=args.body,
-                in_reply_to=in_reply_to,
-                references=references,
-                cc=args.cc,
-                bcc=args.bcc,
-            )
-        else:
-            message = create_message(
-                to=args.to,
-                subject=args.subject,
-                body=args.body,
-                cc=args.cc,
-                bcc=args.bcc,
-            )
+        message = build_mime(
+            to=args.to,
+            subject=args.subject,
+            body=_resolve_body(args),
+            cc=args.cc,
+            bcc=args.bcc,
+            in_reply_to=in_reply_to,
+            references=references,
+            attachments=getattr(args, "attach", None),
+        )
 
         # If replying to a thread, add threadId to keep draft in same conversation
         draft_body = {"message": message}
@@ -1408,9 +1439,12 @@ def main():
     send_parser = subparsers.add_parser("send", help="Send an email (requires confirmation)")
     send_parser.add_argument("--to", "-t", required=True, help="Recipient email address")
     send_parser.add_argument("--subject", "-s", required=True, help="Email subject")
-    send_parser.add_argument("--body", "-b", required=True, help="Email body text")
+    send_parser.add_argument("--body", "-b", help="Email body text (or use --body-file)")
+    send_parser.add_argument("--body-file", dest="body_file", help="Read the body from a file (avoids shell quoting)")
+    send_parser.add_argument("--attach", action="append", help="Attach a file (repeatable)")
     send_parser.add_argument("--cc", help="CC recipients (comma-separated)")
     send_parser.add_argument("--bcc", help="BCC recipients (comma-separated)")
+    send_parser.add_argument("--reply-to-id", dest="reply_to_id", help="Message ID to reply to (threads the sent mail)")
     add_account_arg(send_parser)
     send_parser.set_defaults(func=cmd_send)
 
@@ -1418,7 +1452,9 @@ def main():
     draft_parser = subparsers.add_parser("draft", help="Create a draft email")
     draft_parser.add_argument("--to", "-t", required=True, help="Recipient email address")
     draft_parser.add_argument("--subject", "-s", required=True, help="Email subject")
-    draft_parser.add_argument("--body", "-b", required=True, help="Email body text")
+    draft_parser.add_argument("--body", "-b", help="Email body text (or use --body-file)")
+    draft_parser.add_argument("--body-file", dest="body_file", help="Read the body from a file (avoids shell quoting)")
+    draft_parser.add_argument("--attach", action="append", help="Attach a file (repeatable)")
     draft_parser.add_argument("--cc", help="CC recipients (comma-separated)")
     draft_parser.add_argument("--bcc", help="BCC recipients (comma-separated)")
     draft_parser.add_argument("--thread-id", dest="thread_id", help="Thread ID for threading")
