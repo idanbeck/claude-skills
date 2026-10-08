@@ -135,3 +135,13 @@ beatport-skill/crates/
 # Spotify skill (sensitive)
 spotify-skill/config.json
 spotify-skill/tokens/
+
+# Claude Code managed skill sync + trash (app state, not ours)
+synced/
+.trash/
+
+# Generated audio
+eleven-labs-skill/output/
+
+# Python bytecode in any skill
+**/__pycache__/

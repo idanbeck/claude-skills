@@ -1,0 +1,8 @@
+{
+  "monthly_budget": 10000,
+  "protected_apps": [
+    "zep-unlimited-ocr",
+    "zep-paddle-ocr-vlm",
+    "zep-document-ocr-ensemble"
+  ]
+}
