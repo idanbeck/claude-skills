@@ -14,6 +14,8 @@ Commands:
   summary                        total available/current cash across all accounts
   transactions ACCOUNT           list transactions for an account in a date range
   burn                           inflow vs outflow (net burn) over a period, by counterparty
+  invoices                       accounts-receivable invoices (--customer NAME, --detail for line items)
+  invoice ID                     raw JSON for one invoice
 """
 from __future__ import annotations
 
@@ -222,6 +224,73 @@ def cmd_burn(args):
     }, indent=2))
 
 
+def _items(data, *keys):
+    if isinstance(data, list):
+        return data
+    for k in keys:
+        if isinstance(data.get(k), list):
+            return data[k]
+    return []
+
+
+def _pick(d, *keys):
+    for k in keys:
+        if d.get(k) not in (None, ""):
+            return d.get(k)
+    return None
+
+
+def fetch_invoices():
+    out, cursor = [], None
+    while True:
+        data = api_get("/ar/invoices", {"limit": 1000, "start_after": cursor})
+        batch = _items(data, "invoices", "data", "items")
+        out.extend(batch)
+        page = data.get("page") if isinstance(data, dict) else None
+        cursor = (page or {}).get("nextPage") if isinstance(page, dict) else None
+        if not batch or not cursor:
+            return out
+
+
+def customer_names():
+    names = {}
+    for c in _items(api_get("/ar/customers", {"limit": 1000}), "customers", "data", "items"):
+        names[c.get("id")] = _pick(c, "name", "displayName", "email")
+    return names
+
+
+def cmd_invoices(args):
+    """Accounts-receivable invoices (Mercury Invoicing), optionally filtered by customer."""
+    invoices = fetch_invoices()
+    names = customer_names() if invoices else {}
+    rows = []
+    for inv in invoices:
+        cust = _pick(inv, "customerName") or names.get(inv.get("customerId")) or inv.get("customerId")
+        if args.customer and args.customer.lower() not in str(cust).lower():
+            continue
+        detail = api_get(f"/ar/invoices/{inv['id']}") if args.detail else inv
+        lines = _items(detail, "lineItems", "line_items", "items")
+        rows.append({
+            "id": inv.get("id"),
+            "number": _pick(inv, "invoiceNumber", "number", "slug"),
+            "customer": cust,
+            "status": inv.get("status"),
+            "amount": money(_pick(inv, "amount", "total", "totalAmount")),
+            "invoiceDate": _pick(inv, "invoiceDate", "issueDate", "createdAt"),
+            "dueDate": inv.get("dueDate"),
+            "lines": [{"name": _pick(l, "name", "description", "title"),
+                       "amount": money(_pick(l, "amount", "unitPrice", "total")),
+                       "quantity": l.get("quantity")} for l in lines],
+        })
+    rows.sort(key=lambda r: str(r.get("invoiceDate") or ""), reverse=True)
+    print(json.dumps({"count": len(rows), "invoices": rows}, indent=2))
+
+
+def cmd_invoice(args):
+    """Raw JSON for one invoice, to see every field Mercury returns."""
+    print(json.dumps(api_get(f"/ar/invoices/{args.id}"), indent=2))
+
+
 def main():
     p = argparse.ArgumentParser(description="Mercury Bank read-only skill")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -244,6 +313,15 @@ def main():
     b.add_argument("--top", type=int, default=25, help="top N outflow counterparties")
     b.add_argument("--realized-only", action="store_true", help="count only sent/posted (exclude pending) in outflow")
     b.set_defaults(fn=cmd_burn)
+
+    i = sub.add_parser("invoices", help="accounts-receivable invoices (Mercury Invoicing)")
+    i.add_argument("--customer", help="customer name substring, e.g. andesite")
+    i.add_argument("--detail", action="store_true", help="fetch each invoice to include line items")
+    i.set_defaults(fn=cmd_invoices)
+
+    one = sub.add_parser("invoice", help="raw JSON for one invoice id")
+    one.add_argument("id")
+    one.set_defaults(fn=cmd_invoice)
 
     args = p.parse_args()
     args.fn(args)

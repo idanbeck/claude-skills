@@ -30,7 +30,12 @@ python3 ~/.claude/skills/mercury-skill/mercury_skill.py transactions checking --
 # Net burn over a period, broken down by counterparty + kind
 python3 ~/.claude/skills/mercury-skill/mercury_skill.py burn --start 2026-06-01 --end 2026-06-30
 python3 ~/.claude/skills/mercury-skill/mercury_skill.py burn --start 2026-06-01 --end 2026-06-30 --realized-only --top 30
+# Accounts-receivable invoices (Mercury Invoicing), with line items
+python3 ~/.claude/skills/mercury-skill/mercury_skill.py invoices --customer andesite --detail
+python3 ~/.claude/skills/mercury-skill/mercury_skill.py invoice <invoice-id>   # raw JSON
 ```
+
+**Invoice status is unreliable for customers who pay through Ramp/ACH.** Mercury never matches those payments to the invoice, so it shows "Unpaid" forever. Match against `transactions` instead: the memo reads like "PAYING BILL INV18 VIA RAMP".
 
 ## Notes
 
