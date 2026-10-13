@@ -16,7 +16,7 @@ Everything lives in the vault:
 
 ## Steps
 
-1. **Read first.** Read `Use Cases.md`, every use-case page, and memory `reference_claims_to_stop_repeating.md`, `feedback_built_is_not_delivered.md` and `project_durable_case_study_clearance_gap.md`. Then read the vault `Epoch/Master Plans/Claims to stop repeating.md` and the latest daily notes. Note each page's last `### YYYY-MM-DD refresh` date; the research covers what changed since then.
+1. **Read first.** Read `Use Cases.md`, every use-case page, the private house-rules note `Epoch/Company Information/External Material House Rules.md` (naming, confidentiality, clearances, status words), and memory `reference_claims_to_stop_repeating.md` and `feedback_built_is_not_delivered.md`. Then read the vault `Epoch/Master Plans/Claims to stop repeating.md` and the latest daily notes. Note each page's last `### YYYY-MM-DD refresh` date; the research covers what changed since then.
 
 2. **Research.** Run background agents in parallel, each writing a file to the scratchpad. Keep it to about five agents (weekly-limit lesson).
    - **One market agent per sector with a sheet.** Each reports: what changed (dated, sourced, tagged P/S), printable one-line facts with a "safe to print" flag, competitor moves, buyer-language shifts, suggested sheet edits (quote the exact `.tex` line and give the replacement), and new target accounts.
@@ -54,9 +54,8 @@ Everything lives in the vault:
 
 ## Claim rules (non-negotiable)
 
-- **Never name d-Matrix** or its tools in any external sheet. Say "custom silicon" and "silicon model". Nothing derived from its SDK goes to another chip company.
-- **Name no customer without written clearance.** Andesite and CesiumAstro are unnamed. Durable's quote is on, per Idan 10/4, but add no new naming.
-- **AP is "in pilot". GovCloud is "staging".** Built is not delivered.
+- **Follow the private house-rules note** (`Epoch/Company Information/External Material House Rules.md` in the vault) for which customers and partners may be named, current clearances, and status words. This repo is public, so those specifics never go in this file.
+- **Name no customer without written clearance on file.** Built is not delivered.
 - **Every performance number carries its qualifiers.** Watch the KernelBench evaluator caveat and the bit-exact scope.
 - **Synthetic data only.** Never customer data.
 - **Say "Zerg AI"** (epoch.ai is a different company).
