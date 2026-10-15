@@ -28,6 +28,7 @@ Read them from the arguments (`/kissinger critic=fresh rounds=9 readers="CFO, st
 | `cold_reads` | `1` | How many cold reads you may run. With 2, a failed cold read can be retried after revising. |
 | `readers` | one persona from the brief | A panel of personas. Each gets its own cold read, and every one must pass. |
 | `rounds` | `5` | The round cap. Lord took nine. |
+| `dieter` | `off` | `on`: once the loop reaches Yes, run the Dieter loop (`~/.claude/skills/dieter/SKILL.md`) on the final before the cold read, so one cold read covers both. Dieter never cuts what a gate requires. |
 
 The defaults cost one subagent per run. Never raise a setting on your own, and state the settings used in the report.
 
