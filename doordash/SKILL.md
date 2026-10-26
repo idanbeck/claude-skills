@@ -271,7 +271,13 @@ fees/tax/ETA come from `dd-cli order preview` — not guesses.**
   run `address list` first), and `address set` changes the default among saved ones. Also
   `order history --include-group-order` (plus `--max` 1-100, `--days` default 90 / cap 365).
 - **`--tip-cents` defaults to 0** — silently no tip if you forget it. Always pass it.
-- **Version note:** now on **v0.2.3** (2026-08-19, checksum-verified). Backups:
+- **v0.2.5 (checked 2026-10-26):**
+  - **Same core flow.**
+  - **New commands:** `order reorder`, `order receipt`, `promo`, `store-details`, `restaurant-item-details`; `search --address-id` / `--max-eta-minutes`.
+  - **Failures and partial adds** print `Error: {json}` and exit 1, so parse from the first `{`. `item_errors[].option_groups` lists the required choices; re-add only the failed item with `nested_options`.
+  - **Closed store:** you can still build the cart. Preview's `available_days[0].time_windows[0].midpoint_timestamp` is the value to pass as `--scheduled-time` to both `preview` and `submit`.
+  - **Submit** returns `order_uuid` with `"awaiting processing result"`. Then `order status` → `result.status` = `placed`/`scheduled`.
+- **Version note:** was **v0.2.3** (2026-08-19, checksum-verified). Backups:
   `~/.local/bin/dd-cli.v0.2.2.bak`, `dd-cli.v0.2.0.bak`.
   - ⚠️ **v0.2.3 changed PACKAGING to a PyInstaller *onedir* bundle.** The binary alone is NOT
     runnable — it needs a sibling **`~/.local/bin/_internal/`** directory (~19MB). **Install by
