@@ -160,7 +160,21 @@ An internal move adds a reader who knows the systems. Internal shorthand is proo
 
 **Content floor.** The person's own accomplishments are proof, not ornament. With `dieter=on`, Dieter removes only true duplicates and filler from a resume. Every fact in the person's draft stays unless the person drops it, and "two pages max" means using both pages when the record fills them. In testing, a 1,283-word resume cut to 690 words was rejected as having lost too much of the original.
 
-**Design.** Typeset the PDF (LaTeX or similar): a word-processor build reads as a template. Keep it single column and text-based, with fonts embedded and hyphenation off so keywords stay whole. Check the extracted text. One font mapped its hyphen back to U+2011, which breaks keyword matching; `\XeTeXgenerateactualtext=1` fixes that in XeLaTeX.
+**Design.** Typeset the PDF (LaTeX or similar): a word-processor build reads as a template. Keep it single column and text-based, with fonts embedded and hyphenation off so keywords stay whole. Build the PDF and the `.docx` from one source and one set of design tokens, so the two match.
+
+**Machine-readable PDF.** Test the extracted text with several parsers (pdftotext, pdfminer, pdfplumber, pypdf), not just one. In testing, a XeLaTeX PDF read cleanly in pdftotext but failed in the others:
+- it had no space characters between words, so pdfplumber fused them;
+- letter-spaced headings came out as single letters;
+- hyphens mapped to U+2010, so the phone number failed a regex.
+
+pdfLaTeX with `\pdfinterwordspaceon`, `glyphtounicode` and ligatures off fixed all three. Don't letter-space headings.
+
+**Word file.** This is the file to upload to application portals.
+- Use real Heading 1 section titles and list numbering on every bullet paragraph.
+- Write contact details as plain text: some parsers drop hyperlink runs.
+- Put a space before each date tab, and use no no-break spaces.
+- Embed any font that isn't a system font. If Office also offers it as a cloud font, embed a subset that keeps the original glyph IDs. In testing, a renumbered subset garbled Word's spacing.
+- Leave a line or two of spare room on the last page, because Word on another machine can reflow.
 
 **Usually fails by:**
 - over-cutting the person's own record;
