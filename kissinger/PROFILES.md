@@ -158,7 +158,12 @@ An internal move adds a reader who knows the systems. Internal shorthand is proo
 - **Render through the application the reader will use** (Word for `.docx`) and judge the pages, not the source. A font installed on only one OS reflows on the other, and a missing glyph prints as a box.
 - **Balance the pages.** Cuts can empty page 2. Spend the freed space on readability (an 11 pt body, room between roles), never on restoring cuts. Keep short roles and the skills block from splitting across a page break. If the split still lands badly, an "Earlier experience" section starting on page 2 is cleaner than tuning the spacing.
 
+**Content floor.** The person's own accomplishments are proof, not ornament. With `dieter=on`, Dieter removes only true duplicates and filler from a resume. Every fact in the person's draft stays unless the person drops it, and "two pages max" means using both pages when the record fills them. In testing, a 1,283-word resume cut to 690 words was rejected as having lost too much of the original.
+
+**Design.** Typeset the PDF (LaTeX or similar): a word-processor build reads as a template. Keep it single column and text-based, with fonts embedded and hyphenation off so keywords stay whole. Check the extracted text. One font mapped its hyphen back to U+2011, which breaks keyword matching; `\XeTeXgenerateactualtext=1` fixes that in XeLaTeX.
+
 **Usually fails by:**
+- over-cutting the person's own record;
 - a skills block that lists everything ever touched;
 - a summary that describes a personality ("passionate", "results-driven") instead of a capability;
 - duties instead of results;
