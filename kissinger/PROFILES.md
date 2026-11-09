@@ -119,6 +119,54 @@ These checks are part of the format gate: you check them rather than score them.
 
 **Usually fails by:** burying the ask. Options that are straw men. No cost of doing nothing.
 
+## Resume or CV
+
+**Job:** the reader puts this person on the interview list after a ten-second skim, and the closer read backs that decision with proof.
+
+**Readers.** A resume is read twice:
+- **The screen.** A recruiter or an applicant-tracking system spends seconds on the title, the current role, the dates and the keywords.
+- **The hiring manager.** They read the bullets for scope, ownership and results.
+
+An internal move adds a reader who knows the systems. Internal shorthand is proof to that reader and noise to everyone else.
+
+**One brief per audience.** When the same person targets two kinds of role (an internal move and an outside job, or two different job families), write a brief for each version: its reader, its job and its keywords. Both versions share one fact base. Ask for the job posting; keywords tuned to a posting beat guesses.
+
+| Criterion | A 5 looks like |
+|---|---|
+| Top third | The name, a target-role line and a two- or three-line summary say what this person is for and why, with one piece of proof. A reader who stops there could pass the resume on. |
+| Proof | Each bullet starts with a verb and ends on a result: scope, scale or a measured outcome, with the number's unit and basis. The ownership word matches the record (built, led, owned, contributed). |
+| Fit | The most relevant work comes first and gets the most space. Older or off-target roles shrink to a line or two. The posting's keywords appear where the work happened, not only in a skills list. |
+| Scannability | One column, with a clear hierarchy: name, section, employer, title, bullets. Dates sit in one aligned place. Bullets run two lines or less. There's white space between roles, and both pages are used evenly. |
+| Honest punch | As strong as the record supports, and no stronger. No inflated titles, no invented metrics, and no skills the work doesn't show. A strong fact stated plainly beats an adjective. |
+
+**Gates:**
+- **Facts.** Every title, date, number and tool comes from the person's own material. A missing metric is a `needs Idan` question, never an estimate. Where versions of the record disagree, the newest one the person wrote wins, and claims it dropped stay dropped unless the person restores them.
+- **Arithmetic.** Each "N years" figure matches the role dates, and the same number reads the same in every version.
+- **Length.** One page early in a career, two at most otherwise. Render the PDF and count the pages; never trust the editor's estimate.
+- **Machine-readable.**
+	- Standard section headings, with one employer and title per entry.
+	- No text in headers, footers, text boxes or images.
+	- No tables or columns for core content.
+	- A common font and one date format.
+	- Deliver both `.docx` and PDF.
+- **Confidentiality.** A version for outside readers carries no employer-confidential detail: internal program and project names, unreleased products, incident specifics, partner names, or internal figures a competitor could use. The same facts can go in plain terms.
+- **Personal data.** No first person and no photo. Nothing beyond contact details (no age, marital status or full address) unless the target market expects it.
+- **Privacy.** Resumes about real people stay local: the work folder and the output go in `~/Downloads`, never a shared drive or an online tool.
+
+**Tests:**
+- **Re-check every bullet you shorten against the source.** Compression is where claims drift: a "before delivery" the record never said, a cause that was only a sequence, a "submission" that was a "response". In testing, one round of tightening introduced five such drifts.
+- **Render through the application the reader will use** (Word for `.docx`) and judge the pages, not the source. A font installed on only one OS reflows on the other, and a missing glyph prints as a box.
+- **Balance the pages.** Cuts can empty page 2. Spend the freed space on readability (an 11 pt body, room between roles), never on restoring cuts. Keep short roles and the skills block from splitting across a page break. If the split still lands badly, an "Earlier experience" section starting on page 2 is cleaner than tuning the spacing.
+
+**Usually fails by:**
+- a skills block that lists everything ever touched;
+- a summary that describes a personality ("passionate", "results-driven") instead of a capability;
+- duties instead of results;
+- every bullet the same length and weight;
+- dash-joined bullets that run three lines;
+- internal jargon on an external version;
+- a crammed first page and a thin second.
+
 ## Short story or creative piece
 
 **Job:** an effect on the reader, not a message: what they should feel, and what state they end in (laughing, calm, unsettled). Write the effect into the brief. The cold read passes when the reader describes that effect without being told. For a piece read aloud, the persona is the person reading it out, and they report how the listeners would react.
